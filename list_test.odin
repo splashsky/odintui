@@ -28,7 +28,7 @@ list_test_iterator_and_drawing :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, row_count == 3)
 	text_expect_row(t, &grid, 0, "zero █")
-	text_expect_row(t, &grid, 2, "é界lo…█")
+	text_expect_row(t, &grid, 2, "é界l…█")
 	text_expect_row(t, &grid, 4, "two  │")
 	box_test_cell(t, &grid, 4, 4, {' ', selected})
 	box_test_cell(t, &grid, 4, 1, {' ', style})

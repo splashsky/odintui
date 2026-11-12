@@ -40,7 +40,7 @@ tabs_label_length :: proc(label: string) -> int {
 		if glyph == '\n' || glyph == '\r' {
 			break
 		}
-		count += 1
+		count += min(rune_width(glyph), max(int)-count)
 	}
 	return count
 }
@@ -144,24 +144,16 @@ tabs_draw_label :: proc(grid: ^Grid, layout: ^Tabs_Layout, item: Tabs_Item, styl
 	if rect_is_empty(area) {
 		return
 	}
-	skip := max(layout.offset, start)-start
+	left_edge := i128(layout.bounds.x)+i128(start)-i128(layout.offset)
+	if left_edge < i128(min(int)) || left_edge > i128(max(int)) { return }
 	label := layout.labels[item.index]
-	byte_start, runes := 0, 0
-	for glyph, byte_index in label {
-		if glyph == '\n' || glyph == '\r' || runes == skip {
-			byte_start = byte_index
-			break
-		}
-		runes += 1
-		byte_start = len(label)
+	for glyph, i in label {
+		if glyph == '\n' || glyph == '\r' { label = label[:i]; break }
 	}
-	area.height = 1
-	draw_label(grid, area, label[byte_start:], style)
-	if item.label_length > width && width > 0 {
-		marker := tabs_screen_rect(layout, tabs_add(start, width-1), 1)
-		if !rect_is_empty(marker) {
-			set_cell(grid, marker.x, marker.y, {'…', style})
-		}
+	// Label geometry remains in the unscrolled coordinate system. The clip
+	// handles a viewport beginning in the middle of a wide glyph.
+	if clip_scope(grid, area) {
+		_ = draw_paragraph(grid, {int(left_edge), area.y, width, 1}, label, style, {ellipsis = true})
 	}
 }
 

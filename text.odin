@@ -107,7 +107,17 @@ text_next_line :: proc(spans: []Span, iter: ^Text_Iterator, width: int, wrap: Te
 		if text_break(spans, &iter.cursor, glyph) {
 			return line
 		}
-		if wrap != .None && line.length == width {
+		glyph_width := rune_width(glyph)
+		if glyph_width == 0 {
+			continue
+		}
+		if wrap != .None && glyph_width > width-line.length {
+			// A two-column glyph in a one-column viewport consumes one line
+			// as a clipped space, rather than retrying it forever.
+			if line.length == 0 {
+				line.length = width
+				continue
+			}
 			iter.cursor = before
 			if wrap == .Word {
 				if glyph == ' ' && !in_space && has_word {
@@ -129,13 +139,11 @@ text_next_line :: proc(spans: []Span, iter: ^Text_Iterator, width: int, wrap: Te
 		} else {
 			in_space, has_word = false, true
 		}
-		if line.length < max(int) {
-			line.length += 1
-		}
+		line.length += min(glyph_width, max(int)-line.length)
 	}
 }
 
-// measure_spans returns visual line count and widest line in logical cells.
+// measure_spans returns visual line count and widest line in display columns.
 // Empty text is one empty line; a trailing hard newline adds an empty line.
 // For Char and Word, non-positive width returns zero lines; None ignores width.
 // Word wrapping breaks on ASCII spaces, dropping spaces at soft breaks.
@@ -200,17 +208,37 @@ draw_spans :: proc(
 			truncated := options.ellipsis &&
 			             (line.length > bounds.width || (lines == bounds.height-1 && !iter.done))
 			cursor := line.start
-			for column in 0..<visible {
+			column := 0
+			for column < visible {
 				if x+i128(column) >= i128(clip.x)+i128(clip.width) {
 					break
 				}
-				glyph, style, _ := text_next_rune(spans, &cursor)
-				if truncated && column == visible-1 {
-					glyph = '…'
+				glyph, style, ok := text_next_rune(spans, &cursor)
+				if !ok { break }
+				width := rune_width(glyph)
+				if width == 0 { continue }
+				if truncated && column+width >= visible {
+					// Blank any part of a wide glyph before the marker.
+					for c in column..<visible-1 {
+						pos := x+i128(c)
+						if pos >= i128(clip.x) && pos < i128(clip.x+clip.width) {
+							set_cell(grid, int(pos), int(y), {' ', style})
+						}
+					}
+					pos := x+i128(visible-1)
+					if pos >= i128(clip.x) && pos < i128(clip.x+clip.width) {
+						set_cell(grid, int(pos), int(y), {'…', style})
+					}
+					break
 				}
-				if x+i128(column) >= i128(clip.x) {
-					set_cell(grid, int(x+i128(column)), int(y), {glyph, style})
+				pos := x+i128(column)
+				if width > visible-column {
+					glyph = ' '
 				}
+				if pos >= i128(min(int)) && pos <= i128(max(int)) {
+					set_cell(grid, int(pos), int(y), {glyph, style})
+				}
+				column += width
 			}
 		}
 		lines += 1

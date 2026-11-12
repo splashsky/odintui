@@ -35,6 +35,10 @@ Ansi_Backend :: struct {
 	writer:       io.Writer,
 	color_mode:   Ansi_Color_Mode,
 	replacement:  rune,
+	// Opt in to DEC synchronized output around each nonempty frame.
+	synchronized_output: bool,
+	// Optional grid with caller-owned OSC 8 link planes (see ansi_bind_links).
+	link_grid:    ^Grid,
 	buffer:       [4096]byte,
 	buffer_len:   int,
 	cursor_x:     int,
@@ -44,11 +48,20 @@ Ansi_Backend :: struct {
 	style_known:  bool,
 	style_mode:   Ansi_Color_Mode,
 	cancel:       bool,
+	frame_started, sync_open, link_open: bool,
+	recover_sync, recover_link: bool,
+	active_link: u32,
 }
 
 // ansi_backend returns callbacks borrowing state; state must outlive the Backend.
 ansi_backend :: proc(state: ^Ansi_Backend) -> Backend {
 	return {state, ansi_draw_run, ansi_flush}
+}
+
+// ansi_bind_links binds the same grid passed to render. Passing nil disables
+// links. Call invalidate after changing bindings or URL table contents.
+ansi_bind_links :: proc(state: ^Ansi_Backend, grid: ^Grid) {
+	if state != nil { state.link_grid = grid }
 }
 
 // ansi_enter writes the selected mode sequences immediately, between renders.
@@ -170,6 +183,10 @@ ansi_fail :: proc(state: ^Ansi_Backend) {
 	state.cursor_known = false
 	state.style_known = false
 	state.cancel = true
+	state.recover_sync = state.recover_sync || state.sync_open
+	state.recover_link = state.recover_link || state.link_open
+	state.frame_started, state.sync_open, state.link_open = false, false, false
+	state.active_link = 0
 }
 
 @(private)
@@ -193,6 +210,14 @@ ansi_prepare :: proc(state: ^Ansi_Backend) {
 		state.buffer[state.buffer_len] = 0x18
 		state.buffer_len += 1
 		state.cancel = false
+		if state.recover_link {
+			ansi_append(state, "\x1b]8;;\x1b\\")
+			state.recover_link = false
+		}
+		if state.recover_sync {
+			ansi_append(state, "\x1b[?2026l")
+			state.recover_sync = false
+		}
 	}
 }
 
@@ -388,18 +413,54 @@ ansi_draw_run :: proc(data: rawptr, x, y: int, cells: []Cell) -> bool {
 	if !ansi_reserve(state, 128) {
 		return false
 	}
+	if !state.frame_started {
+		state.frame_started = true
+		if state.synchronized_output {
+			state.sync_open = true
+			ansi_append(state, "\x1b[?2026h")
+		}
+	}
 	if !state.cursor_known || state.cursor_x != x || state.cursor_y != y {
 		ansi_move(state, x, y)
 	}
-	for cell in cells {
+	i := 0
+	for i < len(cells) {
+		cell := cells[i]
 		if !ansi_reserve(state, 128) {
 			return false
+		}
+		id: u32
+		grid := state.link_grid
+		if grid != nil && y < grid.height && x+i < grid.width && len(grid.links) == len(grid.cells) && len(grid.links) > 0 {
+			id = grid.links[y*grid.width+x+i]
+			if u64(id) > u64(len(grid.link_urls)) { id = 0 }
+		}
+		if id != state.active_link {
+			if state.link_open {
+				ansi_append(state, "\x1b]8;;\x1b\\")
+				state.link_open = false
+			}
+			state.active_link = id
+			if id != 0 {
+				// Set before streaming: a short write can interrupt this OSC.
+				state.link_open = true
+				ansi_append(state, "\x1b]8;;")
+				if !ansi_sanitized(state, grid.link_urls[id-1]) { return false }
+				if !ansi_reserve(state, 128) { return false }
+				ansi_append(state, "\x1b\\")
+			}
 		}
 		if !state.style_known || state.style != cell.style || state.style_mode != state.color_mode {
 			ansi_style(state, cell.style)
 		}
 		glyph := cell.glyph
-		if !ansi_single_column(glyph) {
+		width := 1
+		if rune_width(glyph) == 2 && unicode.is_graphic(glyph) &&
+		   i+1 < len(cells) && cells[i+1].glyph == CONTINUATION {
+			width = 2
+		} else if glyph == CONTINUATION {
+			glyph = ' '
+		} else if !ansi_single_column(glyph) {
 			glyph = state.replacement
 			if !ansi_single_column(glyph) {
 				glyph = '?'
@@ -407,7 +468,8 @@ ansi_draw_run :: proc(data: rawptr, x, y: int, cells: []Cell) -> bool {
 		}
 		encoded, n := utf8.encode_rune(glyph)
 		state.buffer_len += copy(state.buffer[state.buffer_len:], encoded[:n])
-		state.cursor_x += 1
+		state.cursor_x += width
+		i += width
 	}
 	return true
 }
@@ -419,11 +481,17 @@ ansi_flush :: proc(data: rawptr) -> bool {
 		return false
 	}
 	ansi_prepare(state)
-	if !ansi_reserve(state, 4) {
+	if !ansi_reserve(state, 32) {
 		return false
 	}
+	if state.link_open { ansi_append(state, "\x1b]8;;\x1b\\") }
 	ansi_append(state, "\x1b[0m")
+	if state.sync_open { ansi_append(state, "\x1b[?2026l") }
 	ok := ansi_drain(state)
 	state.cursor_known, state.style_known = false, false
+	if ok {
+		state.frame_started, state.sync_open, state.link_open = false, false, false
+		state.active_link = 0
+	}
 	return ok
 }

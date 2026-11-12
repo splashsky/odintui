@@ -419,10 +419,31 @@ draw_text_field :: proc(
 	if bounds.width <= 0 || bounds.height <= 0 {
 		return 0, 0, false
 	}
+	mask := options.mask
+	if mask != 0 && (!text_field_printable(mask) || rune_width(mask) == 0) {
+		mask = '*'
+	}
 	cursor_index := utf8.rune_count(string(field.buffer[:field.cursor]))
 	field.scroll = clamp(field.scroll, 0, cursor_index)
-	if cursor_index-field.scroll >= bounds.width {
-		field.scroll = cursor_index-(bounds.width-1)
+	cursor_column, index := 0, 0
+	for r in string(field.buffer[:field.cursor]) {
+		if index >= field.scroll {
+			w := rune_width(r)
+			if mask != 0 { w = rune_width(mask) }
+			cursor_column += w
+		}
+		index += 1
+	}
+	index = 0
+	for r in string(field.buffer[:field.cursor]) {
+		if cursor_column < bounds.width { break }
+		if index >= field.scroll {
+			w := rune_width(r)
+			if mask != 0 { w = rune_width(mask) }
+			cursor_column -= w
+			field.scroll = index+1
+		}
+		index += 1
 	}
 	fill(grid, bounds.x, bounds.y, bounds.width, 1, {' ', options.style})
 	text, style := text_field_text(field), options.style
@@ -430,11 +451,8 @@ draw_text_field :: proc(
 	if placeholder {
 		text, style = options.placeholder, options.placeholder_style
 	}
-	mask := options.mask
-	if mask != 0 && !text_field_printable(mask) {
-		mask = '*'
-	}
-	index, byte_index := 0, 0
+	index = 0
+	byte_index, column := 0, 0
 	for byte_index < len(text) {
 		r, n := utf8.decode_rune(text[byte_index:])
 		byte_index += n
@@ -442,21 +460,22 @@ draw_text_field :: proc(
 			continue
 		}
 		if index >= field.scroll {
-			column := index-field.scroll
 			if column >= bounds.width {
 				break
 			}
+			if !placeholder && mask != 0 { r = mask }
+			width := rune_width(r)
+			if width == 0 { index += 1; continue }
+			if width > bounds.width-column { r = ' ' }
 			x := i128(bounds.x)+i128(column)
 			if x >= i128(min(int)) && x <= i128(max(int)) {
-				if !placeholder && mask != 0 {
-					r = mask
-				}
 				set_cell(grid, int(x), bounds.y, {r, style})
 			}
+			column += width
 		}
 		index += 1
 	}
-	x := i128(bounds.x) + i128(cursor_index-field.scroll)
+	x := i128(bounds.x) + i128(cursor_column)
 	if x < i128(min(int)) || x > i128(max(int)) {
 		return 0, bounds.y, false
 	}

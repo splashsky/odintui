@@ -36,14 +36,17 @@ render :: proc(grid: ^Grid, backend: Backend) -> bool {
 		x := row.start
 		for x < row.end {
 			index := y*grid.width + x
-			if grid.presented_valid && grid.cells[index] == grid.presented[index] {
+			if grid.presented_valid && grid.cells[index] == grid.presented[index] &&
+			   (len(grid.links) == 0 || grid.links[index] == grid.presented_links[index]) {
 				x += 1
 				continue
 			}
 			start := x
 			for x < row.end {
 				index = y*grid.width + x
-				if grid.presented_valid && grid.cells[index] == grid.presented[index] {
+				if grid.presented_valid && grid.cells[index] == grid.presented[index] &&
+				   (len(grid.links) == 0 || grid.links[index] == grid.presented_links[index]) &&
+				   grid.cells[index].glyph != CONTINUATION {
 					break
 				}
 				x += 1
@@ -70,6 +73,10 @@ render :: proc(grid: ^Grid, backend: Backend) -> bool {
 			offset := y * grid.width
 			copy(grid.presented[offset+row.start:offset+row.end],
 			     grid.cells[offset+row.start:offset+row.end])
+			if len(grid.links) > 0 {
+				copy(grid.presented_links[offset+row.start:offset+row.end],
+				     grid.links[offset+row.start:offset+row.end])
+			}
 			row = {}
 		}
 	}
