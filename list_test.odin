@@ -133,3 +133,27 @@ list_test_clipping_and_no_allocations :: proc(t: ^testing.T) {
 	box_test_cell(t, &grid, 2, 0, {'…', {attributes = {.Reverse}}})
 	pop_clip(&grid)
 }
+
+@(test)
+list_test_defaults_and_empty_geometry :: proc(t: ^testing.T) {
+	grid, err := grid_init(4, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	items := []string{"abc", "z"}
+	highlight := Style{bg = rgb(4, 5, 6)}
+	state := List_State{selected = 99, offset = 99}
+	options := List_Options{selected_style = highlight, scrollbar = true, item_height = -1}
+	index, ok := list_index_at(&state, len(items), {0, 0, 4, 3}, 3, 1, options)
+	testing.expect(t, ok && index == 1 && state == List_State{99, 99})
+	draw_list(&grid, {0, 0, 4, 3}, &state, items, options)
+	testing.expect(t, state == List_State{1, 0})
+	box_test_cell(t, &grid, 3, 1, {' ', highlight})
+	box_test_cell(t, &grid, 3, 0, BLANK_CELL)
+	view := list_begin(&state, len(items), {0, 0, -1, 3})
+	_, _, ok = list_next(&view)
+	testing.expect(t, !ok)
+	_, ok = list_index_at(&state, len(items), {0, 0, 4, 0}, 0, 0)
+	testing.expect(t, !ok)
+	list_move(&state, 3, min(int), true)
+	testing.expect(t, state.selected == 2)
+}
