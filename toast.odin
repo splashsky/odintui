@@ -71,7 +71,8 @@ draw_toasts :: proc(
 		style := item.style
 		if style == (Style{}) { style = options.style }
 		fill(grid, area.x, area.y, area.width, 1, {' ', style})
-		content := rect_inset(area, Insets{left = padding, right = padding})
+		actual_padding := min(padding, max(area.width-1, 0)/2)
+		content := rect_inset(area, Insets{left = actual_padding, right = actual_padding})
 		_ = draw_paragraph(grid, content, item.text, style, {ellipsis = true})
 	}
 	return count

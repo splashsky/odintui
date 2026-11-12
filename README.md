@@ -60,6 +60,13 @@ always narrow. The East Asian table comes from Odin core Unicode 15.1, and the
 additional Emoji_Presentation table is generated from Unicode 15.1 data by
 `tools/generate_emoji_width.py`.
 
+To regenerate that table from the matching Unicode data:
+
+```sh
+curl -fsSL https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-data.txt -o /tmp/emoji-data.txt
+python3 tools/generate_emoji_width.py /tmp/emoji-data.txt > emoji_width_generated.odin
+```
+
 There is **no grapheme segmentation**: combining marks, variation selectors,
 ZWJ and other zero-width runes are dropped, not composed with their preceding
 runes. Thus multi-rune emoji, flags and combining sequences are not faithfully
@@ -271,6 +278,8 @@ _ = tui.render_linked(&grid, tui.ansi_extended_backend(&extended), &links)
 
 Annotations persist independently of drawing, are diffed even when glyphs do
 not change, and touching one half of a wide glyph annotates both halves.
+If a newly drawn wide glyph covers different annotations, its second column
+inherits the first column's ID when `render_linked` runs.
 `link_grid_init` clears both non-overlapping planes and invalidates the grid;
 `link_grid_destroy` detaches and invalidates. After any resize, initialize the
 sidecar again with appropriately sized planes before rendering. If URL

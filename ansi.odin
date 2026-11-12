@@ -367,7 +367,7 @@ ansi_single_column :: proc(glyph: rune) -> bool {
 	       !unicode.is_spacing_mark(glyph) &&
 	       !unicode.is_enclosing_mark(glyph) &&
 	       !unicode.is_gcb_extend_class(glyph) &&
-	       unicode.normalized_east_asian_width(glyph) == 1
+	       rune_width(glyph) == 1
 }
 
 @(private)

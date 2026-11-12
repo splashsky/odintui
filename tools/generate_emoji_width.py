@@ -6,8 +6,12 @@ Source: https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-data.txt
 """
 import sys
 
+source = open(sys.argv[1], encoding="utf-8").read()
+if "Emoji Version 15.1" not in source:
+    sys.exit("expected Unicode Emoji 15.1 emoji-data.txt")
+
 ranges = []
-for line in open(sys.argv[1], encoding="utf-8"):
+for line in source.splitlines():
     fields = line.split("#", 1)[0].split(";")
     if len(fields) != 2 or fields[1].strip() != "Emoji_Presentation":
         continue

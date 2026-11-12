@@ -14,7 +14,8 @@ draw_badge :: proc(grid: ^Grid, bounds: Rect, text: string, options: Badge_Optio
 	width := tabs_add(tabs_label_length(text), tabs_add(padding, padding))
 	area := rect_align(bounds, width, 1, .Start, .Start)
 	fill(grid, area.x, area.y, area.width, area.height, {' ', options.style})
-	content := rect_inset(area, Insets{left = padding, right = padding})
+	actual_padding := min(padding, max(area.width-1, 0)/2)
+	content := rect_inset(area, Insets{left = actual_padding, right = actual_padding})
 	_ = draw_paragraph(grid, content, text, options.style, {ellipsis = true})
 	return area
 }
@@ -41,10 +42,11 @@ draw_big_text :: proc(
 		if fraction >= 1 { clip.width = width
 		} else if fraction > 0 { clip.width = widget_progress_width(width, fraction) }
 	}
-	if clip_scope(grid, clip) {
-		return draw_paragraph(grid, bounds, text, style, {align = options.align})
-	}
-	return 0
+	saved_clip := grid.clip
+	grid.clip = rect_intersect(saved_clip, clip)
+	lines := draw_paragraph(grid, bounds, text, style, {align = options.align})
+	grid.clip = saved_clip
+	return lines
 }
 
 // Definition borrows a label and a potentially multiline value.
@@ -67,10 +69,12 @@ draw_definition_list :: proc(
 	if label_width <= 0 {
 		for item in items { label_width = max(label_width, tabs_label_length(item.label)) }
 	}
-	label_width = min(label_width, bounds.width)
+	// Always retain at least one value column, even in a narrow viewport.
+	label_width = min(label_width, max(bounds.width-1, 0))
 	gap := options.gap
 	if gap == 0 { gap = 2 }
-	gap = min(max(gap, 0), bounds.width-label_width)
+	if label_width == 0 { gap = 0 }
+	gap = min(max(gap, 0), max(bounds.width-label_width-1, 0))
 	value_width := bounds.width-label_width-gap
 	label_style := options.label_style
 	if label_style == (Style{}) { label_style.attributes += {.Dim} }

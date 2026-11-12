@@ -52,6 +52,8 @@ wide_test_wrap_truncate_and_ellipsis :: proc(t: ^testing.T) {
 	text_expect_row(t, &grid, 2, "b ")
 	lines, widest = measure_text("界🙂", 1, .Char)
 	testing.expect(t, lines == 2 && widest == 1)
+	lines, widest = measure_text("界 a", 1, .Word)
+	testing.expect(t, lines == 2 && widest == 1)
 	_ = draw_paragraph(&grid, {3, 0, 1, 2}, "界🙂", {}, {wrap = .Char})
 	box_test_cell(t, &grid, 3, 0, BLANK_CELL)
 	box_test_cell(t, &grid, 3, 1, BLANK_CELL)

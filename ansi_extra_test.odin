@@ -139,3 +139,60 @@ ansi_test_existing_positional_literals :: proc(t: ^testing.T) {
 	state := Ansi_Backend{{}, .Truecolor, 0, {}, 0, 0, 0, false, {}, false, .Truecolor, false}
 	testing.expect(t, cell == BLANK_CELL && span.text == "x" && grid.width == 0 && !state.cancel)
 }
+
+@(test)
+ansi_test_wide_replacement_is_rejected :: proc(t: ^testing.T) {
+	writer: ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, replacement = '🇦'}
+	backend := ansi_backend(&state)
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, []Cell{{'\x1b', {}}}))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0m?\x1b[0m")
+}
+
+@(test)
+ansi_test_long_link_and_repeated_recovery :: proc(t: ^testing.T) {
+	grid, err := grid_init(1, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	current, presented: [1]u32
+	long_url: [5000]byte
+	for &b in long_url { b = 'a' }
+	urls := []string{string(long_url[:])}
+	links, ok := link_grid_init(&grid, current[:], presented[:], urls)
+	testing.expect(t, ok && link_grid_set(&links, grid_bounds(&grid), 1))
+	writer := ansi_Test_Writer{short = true}
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	ext := Ansi_Extended_Backend{ansi = &state, links = &links, synchronized_output = true}
+	testing.expect(t, !render_linked(&grid, ansi_extended_backend(&ext), &links))
+	// Failing again while sending recovery must not forget the pending resets.
+	writer.len = 0
+	testing.expect(t, !ansi_extended_recover(&ext))
+	writer.short, writer.len = false, 0
+	testing.expect(t, ansi_extended_recover(&ext))
+	testing.expect_value(t, ansi_test_text(&writer), "\x18\x1b]8;;\x1b\\\x1b[?2026l")
+	writer.len = 0
+	testing.expect(t, render_linked(&grid, ansi_extended_backend(&ext), &links))
+	testing.expect(t, strings.contains(ansi_test_text(&writer), "\x1b]8;;aaaa"))
+	testing.expect(t, strings.has_suffix(ansi_test_text(&writer), "\x1b]8;;\x1b\\\x1b[0m\x1b[?2026l"))
+}
+
+@(test)
+ansi_test_continuation_metadata_diff_includes_lead :: proc(t: ^testing.T) {
+	grid, err := grid_init(3, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	current, presented: [3]u32
+	urls := []string{"a", "b"}
+	links, ok := link_grid_init(&grid, current[:], presented[:], urls)
+	testing.expect(t, ok)
+	set_cell(&grid, 0, 0, {'界', {}})
+	_ = link_grid_set(&links, {0, 0, 2, 1}, 1)
+	mock: Mock_Backend
+	testing.expect(t, render_linked(&grid, mock_backend(&mock), &links))
+	// Simulate a stale presented plane and a narrow dirty interval.
+	links.presented[1] = 2
+	grid_mark_dirty(&grid, 0, 1, 2)
+	testing.expect(t, render_linked(&grid, mock_backend(&mock), &links))
+	testing.expect(t, mock.calls[1] == Call{0, 0, 2})
+}

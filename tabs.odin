@@ -152,9 +152,10 @@ tabs_draw_label :: proc(grid: ^Grid, layout: ^Tabs_Layout, item: Tabs_Item, styl
 	}
 	// Label geometry remains in the unscrolled coordinate system. The clip
 	// handles a viewport beginning in the middle of a wide glyph.
-	if clip_scope(grid, area) {
-		_ = draw_paragraph(grid, {int(left_edge), area.y, width, 1}, label, style, {ellipsis = true})
-	}
+	saved_clip := grid.clip
+	grid.clip = rect_intersect(saved_clip, area)
+	_ = draw_paragraph(grid, {int(left_edge), area.y, width, 1}, label, style, {ellipsis = true})
+	grid.clip = saved_clip
 }
 
 // draw_tabs draws a horizontally scrolled tab bar and optional underline.

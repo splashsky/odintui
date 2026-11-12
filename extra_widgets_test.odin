@@ -112,6 +112,13 @@ badge_big_text_and_definitions :: proc(t: ^testing.T) {
 	text_expect_row(t, &grid, 5, "id    界    ")
 	cell, _ := get_cell(&grid, 0, 3)
 	testing.expect(t, .Dim in cell.style.attributes)
+	// Narrow widgets give content priority over padding or labels.
+	area = draw_badge(&grid, {0, 6, 2, 1}, "abc", {style = style})
+	testing.expect(t, area.width == 2)
+	box_test_cell(t, &grid, 0, 6, {'a', style})
+	box_test_cell(t, &grid, 1, 6, {'…', style})
+	_ = draw_definition_list(&grid, {0, 7, 1, 1}, items)
+	box_test_cell(t, &grid, 0, 7, {'h', {}})
 }
 
 @(test)
@@ -178,4 +185,19 @@ extra_widgets_no_allocation_attempts :: proc(t: ^testing.T) {
 	ok = ansi_set_title(&ansi, "title") && ansi_set_clipboard(&ansi, []byte{1, 2, 3}) && ok
 	context.allocator, context.temp_allocator = previous, temp
 	testing.expect(t, ok && attempts == 0)
+}
+
+@(test)
+extra_widgets_full_clip_stack :: proc(t: ^testing.T) {
+	grid, err := grid_init(8, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	for _ in 0..<MAX_CLIP_DEPTH { testing.expect(t, push_clip(&grid, grid_bounds(&grid))) }
+	labels := []string{"wide"}
+	draw_tabs(&grid, {0, 0, 8, 1}, labels, 0)
+	box_test_cell(t, &grid, 1, 0, {'w', {attributes = {.Reverse}}})
+	_ = draw_big_text(&grid, {0, 1, 8, 1}, "ABCD", {}, {reveal = true, reveal_fraction = 0.5})
+	text_expect_row(t, &grid, 1, "AB      ")
+	testing.expect(t, grid.clip_depth == MAX_CLIP_DEPTH)
+	for _ in 0..<MAX_CLIP_DEPTH { pop_clip(&grid) }
 }

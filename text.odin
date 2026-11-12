@@ -116,6 +116,7 @@ text_next_line :: proc(spans: []Span, iter: ^Text_Iterator, width: int, wrap: Te
 			// as a clipped space, rather than retrying it forever.
 			if line.length == 0 {
 				line.length = width
+				has_word = true
 				continue
 			}
 			iter.cursor = before

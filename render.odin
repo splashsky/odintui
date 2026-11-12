@@ -3,7 +3,7 @@ package odintui
 // draw_run writes a contiguous horizontal run; cells are borrowed for the call.
 // flush commits the writes. Both callbacks return false on failure and must
 // tolerate retries. They must not mutate the grid or retain the cells slice.
-// A backend must sanitize control/invalid runes and map glyphs to single cells.
+// A backend must sanitize controls/invalid runes and emit wide pairs once.
 Backend :: struct {
 	user_data: rawptr,
 	draw_run:  proc(user_data: rawptr, x, y: int, cells: []Cell) -> bool,
@@ -59,6 +59,11 @@ render_internal :: proc(grid: ^Grid, backend: Backend, links: ^Link_Grid) -> boo
 				continue
 			}
 			start := x
+			// Runs must never start on a continuation, even when only its
+			// sidecar metadata changed. Include the already-presented lead.
+			if grid.cells[index].glyph == CONTINUATION && start > 0 {
+				start -= 1
+			}
 			for x < row.end {
 				index = y*grid.width + x
 				if grid.presented_valid && grid.cells[index] == grid.presented[index] &&
