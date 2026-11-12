@@ -286,6 +286,7 @@ text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_
 		}
 		return result
 	}
+
 	key, ok := event.(Key_Event)
 	if !ok {
 		return {}
@@ -351,4 +352,57 @@ text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_
 	case: return {}
 	}
 	return result
+}
+
+// Text_Field_Options configures the row style and whether to draw a cursor.
+Text_Field_Options :: struct {
+	style:   Style,
+	focused: bool,
+}
+
+// draw_text_field paints the first row and keeps the cursor within its width.
+// The returned position is in grid coordinates; visible is true only when
+// focused and the cursor is inside the current clip and grid. The cursor
+// cell retains its glyph/style and gains the Reverse attribute.
+draw_text_field :: proc(
+	grid: ^Grid,
+	bounds: Rect,
+	field: ^Text_Field,
+	options: Text_Field_Options = {},
+) -> (cursor_x, cursor_y: int, cursor_visible: bool) {
+	if bounds.width <= 0 || bounds.height <= 0 {
+		return 0, 0, false
+	}
+	cursor_index := utf8.rune_count(string(field.buffer[:field.cursor]))
+	field.scroll = clamp(field.scroll, 0, cursor_index)
+	if cursor_index-field.scroll >= bounds.width {
+		field.scroll = cursor_index-(bounds.width-1)
+	}
+	fill(grid, bounds.x, bounds.y, bounds.width, 1, {' ', options.style})
+	index := 0
+	for r in text_field_text(field) {
+		if index >= field.scroll {
+			column := index-field.scroll
+			if column >= bounds.width {
+				break
+			}
+			x := i128(bounds.x)+i128(column)
+			if x >= i128(min(int)) && x <= i128(max(int)) {
+				set_cell(grid, int(x), bounds.y, {r, options.style})
+			}
+		}
+		index += 1
+	}
+	x := i128(bounds.x) + i128(cursor_index-field.scroll)
+	if x < i128(min(int)) || x > i128(max(int)) {
+		return 0, bounds.y, false
+	}
+	cursor_x, cursor_y = int(x), bounds.y
+	cursor_visible = options.focused && rect_contains(current_clip(grid), cursor_x, cursor_y)
+	if cursor_visible {
+		cell, _ := get_cell(grid, cursor_x, cursor_y)
+		cell.style.attributes += {.Reverse}
+		set_cell(grid, cursor_x, cursor_y, cell)
+	}
+	return
 }

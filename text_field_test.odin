@@ -150,3 +150,50 @@ text_field_test_paste :: proc(t: ^testing.T) {
 	result = text_field_handle(&field, Paste_Event{kind = .End})
 	testing.expect(t, result.handled && !result.changed)
 }
+
+@(private)
+text_field_test_cell :: proc(t: ^testing.T, grid: ^Grid, x, y: int, expected: Cell) {
+	cell, ok := get_cell(grid, x, y)
+	testing.expect(t, ok && cell == expected)
+}
+
+@(test)
+text_field_test_draw_and_scroll :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	field := text_field_init(buffer[:], "aé界🙂b")
+	style := Style{fg = rgb(1, 2, 3)}
+	options := Text_Field_Options{style = style, focused = true}
+	x, y, visible := draw_text_field(&grid, Rect{1, 0, 3, 2}, &field, options)
+	testing.expect(t, visible && x == 3 && y == 0 && field.scroll == 3)
+	text_field_test_cell(t, &grid, 1, 0, {'🙂', style})
+	text_field_test_cell(t, &grid, 2, 0, {'b', style})
+	text_field_test_cell(t, &grid, 3, 0, {' ', Style{fg = style.fg, attributes = {.Reverse}}})
+	text_field_test_cell(t, &grid, 1, 1, BLANK_CELL)
+	text_field_home(&field)
+	x, y, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
+	testing.expect(t, visible && x == 1 && y == 0 && field.scroll == 0)
+	text_field_test_cell(t, &grid, 1, 0, {'a', Style{fg = style.fg, attributes = {.Reverse}}})
+	text_field_test_cell(t, &grid, 2, 0, {'é', style})
+	text_field_test_cell(t, &grid, 3, 0, {'界', style})
+	text_field_end(&field)
+	_ = push_clip(&grid, Rect{1, 0, 2, 1})
+	x, _, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
+	testing.expect(t, !visible && x == 3)
+	text_field_test_cell(t, &grid, 3, 0, {'界', style})
+	pop_clip(&grid)
+	x, _, visible = draw_text_field(&grid, Rect{-2, 1, 3, 1}, &field, options)
+	testing.expect(t, visible && x == 0)
+	text_field_test_cell(t, &grid, 0, 1, {' ', Style{fg = style.fg, attributes = {.Reverse}}})
+	_, _, visible = draw_text_field(&grid, Rect{max(int), 0, max(int), 1}, &field, options)
+	testing.expect(t, !visible)
+	_, _, visible = draw_text_field(&grid, Rect{min(int), 0, max(int), 1}, &field, options)
+	testing.expect(t, !visible)
+	_, _, visible = draw_text_field(&grid, Rect{0, 0, -1, 1}, &field, options)
+	testing.expect(t, !visible)
+	options.focused = false
+	_, _, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
+	testing.expect(t, !visible)
+}
