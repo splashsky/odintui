@@ -105,3 +105,56 @@ scroll_test_scrollbar_does_not_allocate :: proc(t: ^testing.T) {
 	scroll_test_cell(t, &grid, 4, 0, {'█', {}})
 	testing.expect(t, state.remaining == 0)
 }
+
+@(test)
+scroll_test_slider :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 5)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	draw_slider(&grid, {0, 0, 5, 2}, .Row, 0.5)
+	scroll_test_cell(t, &grid, 1, 0, {'─', {}})
+	scroll_test_cell(t, &grid, 2, 0, {'●', {}})
+	scroll_test_cell(t, &grid, 3, 0, {'─', {}})
+	scroll_test_cell(t, &grid, 2, 1, BLANK_CELL)
+	draw_slider(&grid, {0, 0, 5, 1}, .Row, 2)
+	scroll_test_cell(t, &grid, 4, 0, {'●', {}})
+	draw_slider(&grid, {0, 0, 5, 1}, .Row, -1)
+	scroll_test_cell(t, &grid, 0, 0, {'●', {}})
+	draw_slider(&grid, {0, 0, 5, 1}, .Row, transmute(f64)(u64(0x7ff8_0000_0000_0000)))
+	scroll_test_cell(t, &grid, 0, 0, {'●', {}})
+	style := Style{bg = rgb(4, 5, 6)}
+	testing.expect(t, push_clip(&grid, {5, 2, 1, 2}))
+	draw_slider(&grid, {5, 1, 1, 4}, .Column, 0.7, {
+		track = '.', thumb = '#', track_style = style, thumb_style = style,
+	})
+	pop_clip(&grid)
+	scroll_test_cell(t, &grid, 5, 1, BLANK_CELL)
+	scroll_test_cell(t, &grid, 5, 2, {'.', style})
+	scroll_test_cell(t, &grid, 5, 3, {'#', style})
+	scroll_test_cell(t, &grid, 5, 4, BLANK_CELL)
+	draw_slider(&grid, {0, 4, 1, 1}, .Column, 1)
+	scroll_test_cell(t, &grid, 0, 4, {'●', {}})
+	draw_slider(&grid, {max(int), 0, max(int), 1}, .Row, 1)
+	draw_slider(&grid, {0, min(int), 1, max(int)}, .Column, 1)
+	draw_slider(&grid, {0, 0, -1, 1}, .Row, 0.5)
+	when size_of(int) == 8 {
+		draw_slider(&grid, {-max(int)/2, 4, max(int), 1}, .Row, 0.5)
+		scroll_test_cell(t, &grid, 0, 4, {'●', {}})
+		scroll_test_cell(t, &grid, 1, 4, {'─', {}})
+	}
+}
+
+@(test)
+scroll_test_slider_does_not_allocate :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator, remaining = 3}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
+	grid, err := grid_init(5, 2, allocator)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	context.allocator = allocator
+	draw_slider(&grid, {0, 0, 5, 1}, .Row, 0.5)
+	draw_slider(&grid, {4, 0, 1, 2}, .Column, 1)
+	scroll_test_cell(t, &grid, 2, 0, {'●', {}})
+	scroll_test_cell(t, &grid, 4, 1, {'●', {}})
+	testing.expect(t, state.remaining == 0)
+}

@@ -101,6 +101,44 @@ scrollbar_offset_at :: proc(
 	return scroll_scale(position, travel, total-view), true
 }
 
+// Slider_Options controls track and thumb cells. Zero glyphs select a line
+// matching the axis and a circular thumb.
+Slider_Options :: struct {
+	track, thumb:             rune,
+	track_style, thumb_style: Style,
+}
+
+// draw_slider draws on the first row or column of bounds. Values clamp to
+// [0, 1], NaN is zero, and intermediate positions round toward the start.
+draw_slider :: proc(
+	grid: ^Grid, bounds: Rect, axis: Layout_Axis, value: f64,
+	options: Slider_Options = {},
+) {
+	length := scroll_length(bounds, axis)
+	if length == 0 {
+		return
+	}
+	position := 0
+	if value >= 1 {
+		position = length-1
+	} else if value > 0 {
+		position = widget_progress_width(length-1, value)
+	}
+	track := options.track
+	if track == 0 {
+		track = '─'
+		if axis == .Column {
+			track = '│'
+		}
+	}
+	thumb := options.thumb
+	if thumb == 0 {
+		thumb = '●'
+	}
+	scroll_fill(grid, bounds, axis, 0, length, {track, options.track_style})
+	scroll_fill(grid, bounds, axis, position, 1, {thumb, options.thumb_style})
+}
+
 @(private)
 scroll_length :: proc(bounds: Rect, axis: Layout_Axis) -> int {
 	if rect_is_empty(bounds) {
