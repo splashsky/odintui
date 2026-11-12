@@ -149,3 +149,227 @@ test_text_invalid_utf8 :: proc(t: ^testing.T) {
 	cell, _ = get_cell(&grid, 2, 0)
 	testing.expect(t, cell.glyph == 'b')
 }
+
+@(test)
+test_grid_nested_clips_and_resize :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	pop_clip(&grid)
+	testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+	testing.expect(t, push_clip(&grid, Rect{1, 0, 6, 3}))
+	testing.expect(t, current_clip(&grid) == Rect{1, 0, 4, 3})
+	testing.expect(t, push_clip(&grid, Rect{2, 1, 2, 2}))
+	testing.expect(t, current_clip(&grid) == Rect{2, 1, 2, 2})
+	testing.expect(t, !set_cell(&grid, 1, 1, {'!', {}}))
+	testing.expect(t, set_cell(&grid, 2, 1, {'x', {}}))
+	cell, ok := get_cell(&grid, 1, 1)
+	testing.expect(t, ok && cell == BLANK_CELL)
+	draw_text(&grid, 0, 1, "abcde")
+	fill(&grid, -1, 2, max(int), 1, {'f', {}})
+	draw_border(&grid, Rect{0, 0, 5, 3})
+	cell, _ = get_cell(&grid, 2, 1)
+	testing.expect(t, cell.glyph == 'c')
+	cell, _ = get_cell(&grid, 3, 1)
+	testing.expect(t, cell.glyph == 'd')
+	cell, _ = get_cell(&grid, 2, 2)
+	testing.expect(t, cell.glyph == '-')
+	cell, _ = get_cell(&grid, 4, 2)
+	testing.expect(t, cell == BLANK_CELL)
+	draw_progress_bar(&grid, Rect{0, 0, 5, 3}, 0.6, {}, {})
+	cell, _ = get_cell(&grid, 2, 1)
+	testing.expect(t, cell.glyph == '#')
+	cell, _ = get_cell(&grid, 3, 1)
+	testing.expect(t, cell.glyph == '-')
+	cell, _ = get_cell(&grid, 0, 1)
+	testing.expect(t, cell == BLANK_CELL)
+	pop_clip(&grid)
+
+	testing.expect(t, grid_resize(&grid, 3, 3) == .None)
+	testing.expect(t, current_clip(&grid) == Rect{1, 0, 2, 3})
+	testing.expect(t, grid_resize(&grid, 8, 3) == .None)
+	testing.expect(t, current_clip(&grid) == Rect{1, 0, 6, 3})
+	pop_clip(&grid)
+	testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+	testing.expect(t, push_clip(&grid, Rect{min(int), 0, max(int), 1}))
+	testing.expect(t, rect_is_empty(current_clip(&grid)))
+	testing.expect(t, !set_cell(&grid, 0, 0, {'!', {}}))
+	pop_clip(&grid)
+	testing.expect(t, push_clip(&grid, Rect{9, 0, 2, 1}))
+	testing.expect(t, push_clip(&grid, Rect{10, 0, 2, 1}))
+	testing.expect(t, rect_is_empty(current_clip(&grid)))
+	testing.expect(t, grid_resize(&grid, 12, 3) == .None)
+	testing.expect(t, current_clip(&grid) == Rect{10, 0, 1, 1})
+	pop_clip(&grid)
+	testing.expect(t, current_clip(&grid) == Rect{9, 0, 2, 1})
+	grid_destroy(&grid)
+	testing.expect(t, grid.clip_depth == 0)
+}
+
+@(test)
+test_grid_clip_scope :: proc(t: ^testing.T) {
+	grid, err := grid_init(4, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	{
+		if clip_scope(&grid, Rect{1, 1, 2, 2}) {
+			testing.expect(t, current_clip(&grid) == Rect{1, 1, 2, 2})
+			if clip_scope(&grid, Rect{2, 0, 2, 4}) {
+				testing.expect(t, current_clip(&grid) == Rect{2, 1, 1, 2})
+			}
+			testing.expect(t, current_clip(&grid) == Rect{1, 1, 2, 2})
+		}
+		testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+	}
+	for _ in 0..<MAX_CLIP_DEPTH {
+		testing.expect(t, push_clip(&grid, Rect{1, 1, 2, 2}))
+	}
+	{
+		if clip_scope(&grid, Rect{0, 0, 1, 1}) {
+			testing.expect(t, false)
+		}
+	}
+	testing.expect(t, grid.clip_depth == MAX_CLIP_DEPTH)
+	for _ in 0..<MAX_CLIP_DEPTH {
+		pop_clip(&grid)
+	}
+	testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+}
+
+@(test)
+test_grid_clipped_drawing_does_not_allocate :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator, remaining = 3}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
+	grid, err := grid_init(4, 3, allocator)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	context.allocator = allocator
+	testing.expect(t, state.remaining == 0)
+	{
+		if clip_scope(&grid, Rect{1, 1, 2, 1}) {
+			fill(&grid, 0, 0, 4, 3, {'x', {}})
+			draw_text(&grid, 0, 1, "abcd")
+			draw_label(&grid, Rect{0, 1, 4, 1}, "1234")
+			set_cell(&grid, 2, 1, {'z', {}})
+		}
+	}
+	cell, _ := get_cell(&grid, 1, 1)
+	testing.expect(t, cell.glyph == '2')
+	cell, _ = get_cell(&grid, 2, 1)
+	testing.expect(t, cell.glyph == 'z')
+	cell, _ = get_cell(&grid, 0, 1)
+	testing.expect(t, cell == BLANK_CELL)
+}
+
+@(test)
+test_grid_fill_dirty_ranges_and_render :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+	set_cell(&grid, 2, 1, {'x', {}})
+	set_cell(&grid, 4, 1, {'x', {}})
+	testing.expect(t, render(&grid, backend))
+	count := mock.count
+
+	testing.expect(t, push_clip(&grid, Rect{1, 1, 4, 2}))
+	fill(&grid, -1, 0, max(int), 3, {'x', {}})
+	testing.expect(t, grid.dirty_start == 1 && grid.dirty_end == 3)
+	testing.expect(t, grid.dirty[0] == Dirty_Row{})
+	testing.expect(t, grid.dirty[1] == Dirty_Row{1, 4})
+	testing.expect(t, grid.dirty[2] == Dirty_Row{1, 5})
+	testing.expect(t, grid.dirty[3] == Dirty_Row{})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+3)
+	testing.expect(t, mock.calls[count] == Call{1, 1, 1})
+	testing.expect(t, mock.calls[count+1] == Call{3, 1, 1})
+	testing.expect(t, mock.calls[count+2] == Call{1, 2, 4})
+	fill(&grid, 0, 0, 6, 4, {'x', {}})
+	testing.expect(t, grid.dirty_start == grid.dirty_end)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+3)
+
+	set_cell(&grid, 1, 1, {'!', {}})
+	fill(&grid, 2, 1, 1, 1, {'y', {}})
+	testing.expect(t, grid.dirty[1] == Dirty_Row{1, 3})
+	fill(&grid, 1, 1, 1, 1, {'x', {}})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.calls[count+3] == Call{2, 1, 1})
+	pop_clip(&grid)
+}
+
+@(test)
+test_grid_extended_attributes_render :: proc(t: ^testing.T) {
+	grid, err := grid_init(1, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+	style := Style{attributes = {.Bold, .Italic, .Underline, .Reverse,
+	                            .Dim, .Blink, .Hidden, .Strikethrough}}
+	set_cell(&grid, 0, 0, {'x', style})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.screen[0][0] == Cell{'x', style})
+	set_cell(&grid, 0, 0, {'x', style})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == 2)
+	style.attributes -= {.Strikethrough, .Hidden}
+	set_cell(&grid, 0, 0, {'x', style})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == 3 && mock.screen[0][0] == Cell{'x', style})
+}
+
+@(test)
+test_grid_hex_colors :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator}
+	context.allocator = {procedure = failing_allocator_proc, data = &state}
+	valid := [5]struct{input: string, expected: Color} {
+		{"#Ab3", rgb(170, 187, 51)},
+		{"f09", rgb(255, 0, 153)},
+		{"#123aBc", rgb(18, 58, 188)},
+		{"Ff00Aa", rgb(255, 0, 170)},
+		{"000", rgb(0, 0, 0)},
+	}
+	for item in valid {
+		color, ok := hex(item.input)
+		testing.expect(t, ok && color == item.expected)
+	}
+	invalid := [12]string{
+		"", "#", "ab", "#abcd", "abcdef0", "##123", "#12g",
+		"12345g", " 123", "123\n", "ééé", "\x00123",
+	}
+	for input in invalid {
+		color, ok := hex(input)
+		testing.expect(t, !ok && color == Color{})
+	}
+}
+
+@(test)
+test_grid_clipped_text_dirty_ranges :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+	set_cell(&grid, 1, 0, {'b', {}})
+	set_cell(&grid, 3, 0, {'d', {}})
+	testing.expect(t, render(&grid, backend))
+	count := mock.count
+	testing.expect(t, push_clip(&grid, Rect{1, 0, 4, 1}))
+	draw_text(&grid, 0, 0, "abcde")
+	testing.expect(t, grid.dirty[0] == Dirty_Row{2, 5})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+2)
+	testing.expect(t, mock.calls[count] == Call{2, 0, 1})
+	testing.expect(t, mock.calls[count+1] == Call{4, 0, 1})
+	draw_text(&grid, 0, 0, "abcde")
+	draw_text(&grid, min(int), 0, "abc")
+	draw_text(&grid, max(int), 0, "abc")
+	testing.expect(t, grid.dirty_start == grid.dirty_end)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+2)
+}

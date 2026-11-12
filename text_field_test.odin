@@ -1,0 +1,362 @@
+package odintui
+
+import "base:runtime"
+import "core:testing"
+
+@(test)
+text_field_test_editing :: proc(t: ^testing.T) {
+	buffer: [12]byte
+	field := text_field_init(buffer[:], "aé界🙂xyz")
+	testing.expect(t, text_field_text(&field) == "aé界🙂xy")
+	testing.expect(t, field.cursor == 12)
+	testing.expect(t, !text_field_insert_rune(&field, 'z'))
+	testing.expect(t, text_field_backspace(&field))
+	testing.expect(t, text_field_backspace(&field))
+	testing.expect(t, text_field_backspace(&field))
+	testing.expect(t, text_field_text(&field) == "aé界")
+	field.cursor = 1
+	testing.expect(t, text_field_delete(&field))
+	testing.expect(t, text_field_text(&field) == "a界")
+	testing.expect(t, text_field_insert_string(&field, "🙂\t\xff!"))
+	testing.expect(t, text_field_text(&field) == "a🙂!界")
+	field.max_runes = 4
+	testing.expect(t, !text_field_insert_string(&field, "ab"))
+	testing.expect(t, text_field_text(&field) == "a🙂!界")
+	testing.expect(t, !text_field_set_text(&field, "12345"))
+	testing.expect(t, text_field_text(&field) == "a🙂!界")
+	testing.expect(t, text_field_set_text(&field, "é\t界"))
+	testing.expect(t, text_field_text(&field) == "é界" && field.cursor == 5)
+	text_field_clear(&field)
+	testing.expect(t, !text_field_backspace(&field) && !text_field_delete(&field))
+	testing.expect(t, text_field_text(&field) == "" && field.scroll == 0)
+}
+
+@(test)
+text_field_test_capacity_and_invalid :: proc(t: ^testing.T) {
+	buffer: [4]byte
+	field := text_field_init(buffer[:], "é界a")
+	testing.expect(t, text_field_text(&field) == "é")
+	testing.expect(t, !text_field_insert_string(&field, "a界"))
+	testing.expect(t, text_field_text(&field) == "é")
+	testing.expect(t, text_field_insert_string(&field, "\xc3\x80\xff\x00"))
+	testing.expect(t, text_field_text(&field) == "éÀ")
+	testing.expect(t, text_field_insert_rune(&field, rune(0xd800)))
+	testing.expect(t, text_field_text(&field) == "éÀ")
+	empty := text_field_init(nil, "a")
+	testing.expect(t, text_field_text(&empty) == "")
+	testing.expect(t, !text_field_insert_rune(&empty, 'a'))
+}
+
+@(test)
+text_field_test_movement_and_word_deletion :: proc(t: ^testing.T) {
+	buffer: [64]byte
+	field := text_field_init(buffer[:], "α,β\u00a0  界🙂 end  ")
+	text_field_word_left(&field)
+	testing.expect(t, text_field_text(&field)[field.cursor:] == "end  ")
+	text_field_word_left(&field)
+	testing.expect(t, text_field_text(&field)[field.cursor:] == "界🙂 end  ")
+	text_field_left(&field)
+	testing.expect(t, text_field_text(&field)[field.cursor:] == " 界🙂 end  ")
+	text_field_right(&field)
+	testing.expect(t, text_field_text(&field)[field.cursor:] == "界🙂 end  ")
+	text_field_word_right(&field)
+	testing.expect(t, text_field_text(&field)[field.cursor:] == " end  ")
+	testing.expect(t, text_field_delete_word_backward(&field))
+	testing.expect(t, text_field_text(&field) == "α,β\u00a0   end  ")
+	testing.expect(t, text_field_delete_to_start(&field))
+	testing.expect(t, text_field_text(&field) == " end  " && field.cursor == 0)
+	testing.expect(t, !text_field_delete_to_start(&field))
+	text_field_word_right(&field)
+	testing.expect(t, text_field_text(&field)[:field.cursor] == " end")
+	testing.expect(t, text_field_delete_to_end(&field))
+	testing.expect(t, text_field_text(&field) == " end")
+	testing.expect(t, !text_field_delete_to_end(&field))
+	text_field_home(&field)
+	text_field_left(&field)
+	testing.expect(t, field.cursor == 0 && !text_field_delete_word_backward(&field))
+	text_field_end(&field)
+	text_field_right(&field)
+	testing.expect(t, field.cursor == field.length)
+}
+
+@(test)
+text_field_test_keys :: proc(t: ^testing.T) {
+	buffer: [32]byte
+	field := text_field_init(buffer[:], "one 世界")
+	result := text_field_handle(&field, Key_Event{key = .Left, modifiers = {.Ctrl}})
+	testing.expect(t, result.handled && !result.changed && field.cursor == 4)
+	result = text_field_handle(&field, Key_Event{.Rune, 'f', {.Alt}})
+	testing.expect(t, result.handled && field.cursor == field.length)
+	result = text_field_handle(&field, Key_Event{key = .Backspace, modifiers = {.Alt}})
+	testing.expect(t, result.handled && result.changed && text_field_text(&field) == "one ")
+	result = text_field_handle(&field, Key_Event{.Rune, 'a', {.Ctrl}})
+	testing.expect(t, result.handled && field.cursor == 0)
+	result = text_field_handle(&field, Key_Event{.Rune, '🙂', {.Shift}})
+	testing.expect(t, result.changed && text_field_text(&field) == "🙂one ")
+	result = text_field_handle(&field, Key_Event{.Rune, 'd', {.Ctrl}})
+	testing.expect(t, result.changed && text_field_text(&field) == "🙂ne ")
+	_ = text_field_handle(&field, Key_Event{key = .End})
+	result = text_field_handle(&field, Key_Event{.Rune, 'w', {.Ctrl}})
+	testing.expect(t, result.changed && text_field_text(&field) == "")
+	result = text_field_handle(&field, Key_Event{key = .Backspace})
+	testing.expect(t, result.handled && !result.changed)
+	_ = text_field_set_text(&field, "abc")
+	_ = text_field_handle(&field, Key_Event{key = .Home})
+	_ = text_field_handle(&field, Key_Event{key = .Right})
+	result = text_field_handle(&field, Key_Event{.Rune, 'k', {.Ctrl}})
+	testing.expect(t, result.changed && text_field_text(&field) == "a")
+	_ = text_field_handle(&field, Key_Event{.Rune, 'e', {.Ctrl}})
+	result = text_field_handle(&field, Key_Event{.Rune, 'u', {.Ctrl}})
+	testing.expect(t, result.changed && text_field_text(&field) == "")
+	_ = text_field_set_text(&field, "one two")
+	_ = text_field_handle(&field, Key_Event{.Rune, 'b', {.Alt}})
+	result = text_field_handle(&field, Key_Event{key = .Delete})
+	testing.expect(t, result.changed && text_field_text(&field) == "one wo")
+	_ = text_field_handle(&field, Key_Event{key = .Right, modifiers = {.Ctrl}})
+	result = text_field_handle(&field, Key_Event{key = .Left})
+	testing.expect(t, result.handled && text_field_text(&field)[field.cursor:] == "o")
+	result = text_field_handle(&field, Key_Event{key = .Enter})
+	testing.expect(t, result.handled && result.submitted && !result.changed)
+	result = text_field_handle(&field, Key_Event{key = .Escape})
+	testing.expect(t, result.handled && result.cancelled)
+	testing.expect(t, !text_field_handle(&field, Key_Event{key = .Tab}).handled)
+	testing.expect(t, !text_field_handle(&field, Key_Event{key = .Left, modifiers = {.Shift}}).handled)
+	testing.expect(t, !text_field_handle(&field, Key_Event{.Rune, 'x', {.Super}}).handled)
+	testing.expect(t, !text_field_handle(&field, Key_Event{.Rune, '\n', {}}).handled)
+	testing.expect(t, !text_field_handle(&field, Mouse_Event{}).handled)
+	field.max_runes = 1
+	result = text_field_handle(&field, Key_Event{.Rune, 'x', {}})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "one wo")
+}
+
+@(test)
+text_field_test_paste :: proc(t: ^testing.T) {
+	buffer: [12]byte
+	field := text_field_init(buffer[:], "a")
+	start := text_field_handle(&field, Paste_Event{kind = .Start})
+	testing.expect(t, start.handled && !start.changed)
+	chunk := transmute([]byte)string("é\n\t\x00\u2028\u2029🙂")
+	result := text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.handled && result.changed && text_field_text(&field) == "aé🙂")
+	chunk = transmute([]byte)string("\xe7\x95")
+	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.handled && !result.changed)
+	chunk = transmute([]byte)string("\x8cX")
+	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.changed && text_field_text(&field) == "aé🙂X")
+	chunk = transmute([]byte)string("12345")
+	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.handled && result.changed && text_field_text(&field) == "aé🙂X1234")
+	result = text_field_handle(&field, Paste_Event{kind = .End})
+	testing.expect(t, result.handled && !result.changed)
+}
+
+@(test)
+text_field_test_paste_fitting_prefix :: proc(t: ^testing.T) {
+	buffer: [8]byte
+	field := text_field_init(buffer[:], "ab")
+	text_field_left(&field)
+	chunk := transmute([]byte)string("\n\xffé🙂X")
+	result := text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.handled && result.changed)
+	testing.expect(t, text_field_text(&field) == "aé🙂b" && field.cursor == 7)
+	result = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("X")})
+	testing.expect(t, result.handled && !result.changed)
+
+	field = text_field_init(buffer[:], "ab")
+	field.max_runes = 4
+	text_field_home(&field)
+	chunk = transmute([]byte)string("\t界\xfféX")
+	result = text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.changed && text_field_text(&field) == "界éab" && field.cursor == 5)
+	testing.expect(t, !text_field_insert_string(&field, "X"))
+	field.max_runes = 1
+	result = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("X")})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "界éab")
+
+	field = text_field_init(buffer[:4], "ab")
+	chunk = transmute([]byte)string("界x")
+	result = text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "ab")
+	chunk = field.buffer[:field.length]
+	result = text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "ab")
+}
+
+@(private)
+text_field_test_cell :: proc(t: ^testing.T, grid: ^Grid, x, y: int, expected: Cell) {
+	cell, ok := get_cell(grid, x, y)
+	testing.expect(t, ok && cell == expected)
+}
+
+@(test)
+text_field_test_draw_and_scroll :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	field := text_field_init(buffer[:], "aé界🙂b")
+	style := Style{fg = rgb(1, 2, 3)}
+	options := Text_Field_Options{style = style, focused = true}
+	x, y, visible := draw_text_field(&grid, Rect{1, 0, 3, 2}, &field, options)
+	testing.expect(t, visible && x == 3 && y == 0 && field.scroll == 3)
+	text_field_test_cell(t, &grid, 1, 0, {'🙂', style})
+	text_field_test_cell(t, &grid, 2, 0, {'b', style})
+	text_field_test_cell(t, &grid, 3, 0, {' ', Style{fg = style.fg, attributes = {.Reverse}}})
+	text_field_test_cell(t, &grid, 1, 1, BLANK_CELL)
+	text_field_home(&field)
+	x, y, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
+	testing.expect(t, visible && x == 1 && y == 0 && field.scroll == 0)
+	text_field_test_cell(t, &grid, 1, 0, {'a', Style{fg = style.fg, attributes = {.Reverse}}})
+	text_field_test_cell(t, &grid, 2, 0, {'é', style})
+	text_field_test_cell(t, &grid, 3, 0, {'界', style})
+	text_field_end(&field)
+	_ = push_clip(&grid, Rect{1, 0, 2, 1})
+	x, _, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
+	testing.expect(t, !visible && x == 3)
+	text_field_test_cell(t, &grid, 3, 0, {'界', style})
+	pop_clip(&grid)
+	x, _, visible = draw_text_field(&grid, Rect{-2, 1, 3, 1}, &field, options)
+	testing.expect(t, visible && x == 0)
+	text_field_test_cell(t, &grid, 0, 1, {' ', Style{fg = style.fg, attributes = {.Reverse}}})
+	_, _, visible = draw_text_field(&grid, Rect{max(int), 0, max(int), 1}, &field, options)
+	testing.expect(t, !visible)
+	_, _, visible = draw_text_field(&grid, Rect{min(int), 0, max(int), 1}, &field, options)
+	testing.expect(t, !visible)
+	_, _, visible = draw_text_field(&grid, Rect{0, 0, -1, 1}, &field, options)
+	testing.expect(t, !visible)
+	options.focused = false
+	_, _, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
+	testing.expect(t, !visible)
+}
+
+@(test)
+text_field_test_placeholder_and_mask :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	field := text_field_init(buffer[:])
+	style := Style{bg = rgb(4, 5, 6)}
+	hint := Style{fg = rgb(7, 8, 9), attributes = {.Dim}}
+	options := Text_Field_Options{
+		style = style,
+		placeholder = "é\n\xff界!",
+		placeholder_style = hint,
+		focused = true,
+		mask = '●',
+	}
+	_, _, visible := draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	testing.expect(t, visible)
+	cursor_hint := hint
+	cursor_hint.attributes += {.Reverse}
+	text_field_test_cell(t, &grid, 0, 0, {'é', cursor_hint})
+	text_field_test_cell(t, &grid, 1, 0, {'界', hint})
+	text_field_test_cell(t, &grid, 2, 0, {'!', hint})
+	text_field_test_cell(t, &grid, 3, 0, {' ', style})
+	testing.expect(t, text_field_set_text(&field, "A🙂"))
+	text_field_home(&field)
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	cursor_style := style
+	cursor_style.attributes += {.Reverse}
+	text_field_test_cell(t, &grid, 0, 0, {'●', cursor_style})
+	text_field_test_cell(t, &grid, 1, 0, {'●', style})
+	text_field_test_cell(t, &grid, 2, 0, {' ', style})
+	options.mask = '\n'
+	options.focused = false
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	text_field_test_cell(t, &grid, 0, 0, {'*', style})
+	text_field_test_cell(t, &grid, 1, 0, {'*', style})
+	options.mask = 0
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	text_field_test_cell(t, &grid, 0, 0, {'A', style})
+	text_field_test_cell(t, &grid, 1, 0, {'🙂', style})
+}
+
+@(test)
+text_field_test_no_allocation :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator, remaining = 3}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
+	grid, err := grid_init(5, 1, allocator)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	good := false
+	{
+		previous := context.allocator
+		context.allocator = allocator
+		defer context.allocator = previous
+		field := text_field_init(buffer[:], "é word")
+		_ = text_field_handle(&field, Key_Event{.Rune, 'w', {.Ctrl}})
+		field.max_runes = 3
+		_ = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("界🙂")})
+		_ = text_field_insert_rune(&field, 'z')
+		text_field_word_left(&field)
+		text_field_word_right(&field)
+		_ = text_field_backspace(&field)
+		_ = push_clip(&grid, Rect{0, 0, 5, 1})
+		_, _, visible := draw_text_field(
+			&grid, Rect{0, 0, 5, 1}, &field, {focused = true, mask = '*'},
+		)
+		pop_clip(&grid)
+		text_field_clear(&field)
+		_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, {placeholder = "hint"})
+		ok := render(&grid, backend)
+		good = visible && ok && mock.screen[0][0].glyph == 'h' && state.remaining == 0
+	}
+	testing.expect(t, good)
+}
+
+@(test)
+text_field_test_render_diffs :: proc(t: ^testing.T) {
+	grid, err := grid_init(4, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [8]byte
+	field := text_field_init(buffer[:], "ab")
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	options := Text_Field_Options{focused = true}
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 4, 1}, &field, options)
+	testing.expect(t, render(&grid, backend))
+	count := mock.count
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 4, 1}, &field, options)
+	testing.expect(t, render(&grid, backend) && mock.count == count)
+	text_field_left(&field)
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 4, 1}, &field, options)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+1 && mock.calls[count] == Call{1, 0, 2})
+	testing.expect(t, .Reverse in mock.screen[0][1].style.attributes)
+	testing.expect(t, .Reverse not_in mock.screen[0][2].style.attributes)
+}
+
+@(test)
+text_field_test_overlapping_sources :: proc(t: ^testing.T) {
+	storage: [64]byte
+	copy(storage[:], transmute([]byte)string("A\né🙂Z"))
+	field := text_field_init(storage[0:32], string(storage[:9]))
+	testing.expect(t, text_field_text(&field) == "Aé🙂Z")
+	source := text_field_text(&field)[1:7]
+	testing.expect(t, text_field_set_text(&field, source))
+	testing.expect(t, text_field_text(&field) == "é🙂")
+	copy(storage[:], transmute([]byte)string("abcd"))
+	before := storage
+	field = text_field_init(storage[1:32], string(storage[:4]))
+	testing.expect(t, text_field_text(&field) == "" && storage == before)
+	testing.expect(t, !text_field_set_text(&field, string(storage[:4])) && storage == before)
+}
+
+@(test)
+text_field_test_reject_overlapping_insert :: proc(t: ^testing.T) {
+	storage: [32]byte
+	field := text_field_init(storage[:], "é🙂Z")
+	text_field_home(&field)
+	text_field_right(&field)
+	before := storage
+	cursor := field.cursor
+	testing.expect(t, !text_field_insert_string(&field, text_field_text(&field)[2:6]))
+	testing.expect(t, storage == before && field.cursor == cursor)
+	testing.expect(t, text_field_text(&field) == "é🙂Z")
+}
