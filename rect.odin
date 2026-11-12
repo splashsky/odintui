@@ -41,6 +41,7 @@ rect_contains :: proc(r: Rect, x, y: int) -> bool {
 
 // rect_inset removes a uniform or per-side inset, treating negatives as zero.
 // Insets are consumed from the start side first and clipped to the available size.
+// If an origin would exceed max(int), it is clamped and that extent becomes zero.
 rect_inset :: proc{rect_inset_uniform, rect_inset_sides}
 
 @(private)
@@ -68,6 +69,7 @@ rect_inset_span :: proc(origin, extent, before, after: int) -> (int, int) {
 }
 
 // rect_align places a clamped size within outer. Center rounds toward start.
+// If an origin would exceed max(int), it is clamped and that extent becomes zero.
 rect_align :: proc(
 	outer: Rect,
 	width, height: int,
