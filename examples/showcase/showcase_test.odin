@@ -154,7 +154,13 @@ test_frames_do_not_allocate_and_diff_unchanged :: proc(t: ^testing.T) {
 	same_runs := mock.runs == runs
 	app_event(&app, tui.Key_Event{key = .Tab})
 	app_event(&app, tui.Key_Event{key = .Rune, rune = 'A'})
+	paste := [2]byte{'B', 'C'}
+	app_event(&app, tui.Paste_Event{kind = .Start})
+	app_event(&app, tui.Paste_Event{kind = .Chunk, text = paste[:]})
+	app_event(&app, tui.Paste_Event{kind = .End})
 	app_event(&app, tui.Key_Event{key = .Enter})
+	app_event(&app, tui.Focus_Event{focused = true})
+	app_event(&app, tui.Mouse_Event{x = 1, y = 2, button = .Wheel_Down, action = .Press})
 	app_draw(&grid, &app)
 	third_ok := tui.render(&grid, backend)
 	context.allocator, context.temp_allocator = saved_allocator, saved_temp
