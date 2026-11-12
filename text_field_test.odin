@@ -1,5 +1,6 @@
 package odintui
 
+import "base:runtime"
 import "core:testing"
 
 @(test)
@@ -196,4 +197,75 @@ text_field_test_draw_and_scroll :: proc(t: ^testing.T) {
 	options.focused = false
 	_, _, visible = draw_text_field(&grid, Rect{1, 0, 3, 1}, &field, options)
 	testing.expect(t, !visible)
+}
+
+@(test)
+text_field_test_placeholder_and_mask :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	field := text_field_init(buffer[:])
+	style := Style{bg = rgb(4, 5, 6)}
+	hint := Style{fg = rgb(7, 8, 9), attributes = {.Dim}}
+	options := Text_Field_Options{
+		style = style,
+		placeholder = "é\n\xff界!",
+		placeholder_style = hint,
+		focused = true,
+		mask = '●',
+	}
+	_, _, visible := draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	testing.expect(t, visible)
+	cursor_hint := hint
+	cursor_hint.attributes += {.Reverse}
+	text_field_test_cell(t, &grid, 0, 0, {'é', cursor_hint})
+	text_field_test_cell(t, &grid, 1, 0, {'界', hint})
+	text_field_test_cell(t, &grid, 2, 0, {'!', hint})
+	text_field_test_cell(t, &grid, 3, 0, {' ', style})
+	testing.expect(t, text_field_set_text(&field, "A🙂"))
+	text_field_home(&field)
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	cursor_style := style
+	cursor_style.attributes += {.Reverse}
+	text_field_test_cell(t, &grid, 0, 0, {'●', cursor_style})
+	text_field_test_cell(t, &grid, 1, 0, {'●', style})
+	text_field_test_cell(t, &grid, 2, 0, {' ', style})
+	options.mask = '\n'
+	options.focused = false
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	text_field_test_cell(t, &grid, 0, 0, {'A', style})
+	text_field_test_cell(t, &grid, 1, 0, {'🙂', style})
+}
+
+@(test)
+text_field_test_no_allocation :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator, remaining = 3}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
+	grid, err := grid_init(5, 1, allocator)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	good := false
+	{
+		previous := context.allocator
+		context.allocator = allocator
+		defer context.allocator = previous
+		field := text_field_init(buffer[:], "é word")
+		_ = text_field_handle(&field, Key_Event{.Rune, 'w', {.Ctrl}})
+		_ = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("界🙂")})
+		_ = text_field_insert_rune(&field, 'z')
+		text_field_word_left(&field)
+		text_field_word_right(&field)
+		_ = text_field_backspace(&field)
+		_ = push_clip(&grid, Rect{0, 0, 5, 1})
+		_, _, visible := draw_text_field(
+			&grid, Rect{0, 0, 5, 1}, &field, {focused = true, mask = '*'},
+		)
+		pop_clip(&grid)
+		text_field_clear(&field)
+		_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, {placeholder = "hint"})
+		good = visible && state.remaining == 0
+	}
+	testing.expect(t, good)
 }

@@ -354,16 +354,21 @@ text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_
 	return result
 }
 
-// Text_Field_Options configures the row style and whether to draw a cursor.
+// Text_Field_Options configures the field, placeholder, mask and cursor.
+// A zero or non-printable mask disables masking.
 Text_Field_Options :: struct {
-	style:   Style,
-	focused: bool,
+	style:             Style,
+	placeholder:       string,
+	placeholder_style: Style,
+	mask:              rune,
+	focused:           bool,
 }
 
 // draw_text_field paints the first row and keeps the cursor within its width.
 // The returned position is in grid coordinates; visible is true only when
 // focused and the cursor is inside the current clip and grid. The cursor
-// cell retains its glyph/style and gains the Reverse attribute.
+// cell retains its glyph/style and gains the Reverse attribute. Placeholder
+// controls and invalid UTF-8 bytes are discarded like inserted text.
 draw_text_field :: proc(
 	grid: ^Grid,
 	bounds: Rect,
@@ -379,8 +384,19 @@ draw_text_field :: proc(
 		field.scroll = cursor_index-(bounds.width-1)
 	}
 	fill(grid, bounds.x, bounds.y, bounds.width, 1, {' ', options.style})
-	index := 0
-	for r in text_field_text(field) {
+	text, style := text_field_text(field), options.style
+	placeholder := field.length == 0
+	if placeholder {
+		text, style = options.placeholder, options.placeholder_style
+	}
+	mask := !placeholder && text_field_printable(options.mask)
+	index, byte_index := 0, 0
+	for byte_index < len(text) {
+		r, n := utf8.decode_rune(text[byte_index:])
+		byte_index += n
+		if !text_field_printable(r) || (r == utf8.RUNE_ERROR && n == 1) {
+			continue
+		}
 		if index >= field.scroll {
 			column := index-field.scroll
 			if column >= bounds.width {
@@ -388,7 +404,10 @@ draw_text_field :: proc(
 			}
 			x := i128(bounds.x)+i128(column)
 			if x >= i128(min(int)) && x <= i128(max(int)) {
-				set_cell(grid, int(x), bounds.y, {r, options.style})
+				if mask {
+					r = options.mask
+				}
+				set_cell(grid, int(x), bounds.y, {r, style})
 			}
 		}
 		index += 1
