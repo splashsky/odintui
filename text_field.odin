@@ -15,22 +15,25 @@ Text_Field :: struct {
 }
 
 // text_field_init copies as much initial text as fits, without splitting a
-// rune. Initial text must not overlap buffer. Invalid UTF-8 and C0/C1 controls
-// are discarded, as they are for all insertion operations.
+// rune. Invalid UTF-8 and C0/C1 controls are discarded, as for insertion.
+// Initial text may overlap the buffer.
 text_field_init :: proc(buffer: []byte, initial := "") -> Text_Field {
 	field := Text_Field{buffer = buffer}
+	prefix := 0
 	for i := 0; i < len(initial); {
 		r, n := utf8.decode_rune(initial[i:])
 		i += n
 		if !text_field_printable(r) || (r == utf8.RUNE_ERROR && n == 1) {
+			prefix = i
 			continue
 		}
 		if n > len(buffer)-field.length {
 			break
 		}
-		copy(buffer[field.length:], transmute([]byte)initial[i-n:i])
 		field.length += n
+		prefix = i
 	}
+	text_field_copy(buffer[:field.length], initial[:prefix])
 	field.cursor = field.length
 	return field
 }
@@ -71,7 +74,7 @@ text_field_measure :: proc(text: string) -> (bytes, runes: int) {
 }
 
 @(private)
-text_field_copy :: proc(buffer: []byte, text: string) {
+text_field_copy_forward :: proc(buffer: []byte, text: string) {
 	offset := 0
 	for i := 0; i < len(text); {
 		r, n := utf8.decode_rune(text[i:])
@@ -83,23 +86,98 @@ text_field_copy :: proc(buffer: []byte, text: string) {
 	}
 }
 
+@(private)
+text_field_copy :: proc(buffer: []byte, text: string) {
+	if len(buffer) == 0 || len(text) == 0 {
+		return
+	}
+	dst, src := uintptr(raw_data(buffer)), uintptr(raw_data(text))
+	if dst <= src || dst-src >= uintptr(len(text)) {
+		text_field_copy_forward(buffer, text)
+		return
+	}
+	distance := dst-src
+	cut, written := len(text), len(buffer)
+	output := 0
+	for i := 0; i < len(text); {
+		r, n := utf8.decode_rune(text[i:])
+		i += n
+		if text_field_printable(r) && (r != utf8.RUNE_ERROR || n != 1) {
+			output += n
+		}
+		if uintptr(i-output) >= distance {
+			cut, written = i, output
+			break
+		}
+	}
+	end, out := cut, written
+	for end > 0 {
+		r, n := utf8.decode_last_rune(text[:end])
+		if text_field_printable(r) && (r != utf8.RUNE_ERROR || n != 1) {
+			out -= n
+			copy(buffer[out:out+n], transmute([]byte)text[end-n:end])
+		}
+		end -= n
+	}
+	text_field_copy_forward(buffer[written:], text[cut:])
+}
+
+@(private)
+text_field_copy_alias :: proc(field: ^Text_Field, text: string, start, added: int) {
+	offset, out := 0, field.cursor
+	for offset < len(text) {
+		bytes: [4]byte
+		count := min(len(bytes), len(text)-offset)
+		for i in 0..<count {
+			source := start+offset+i
+			if source >= field.cursor {
+				source += added
+			}
+			bytes[i] = field.buffer[source]
+		}
+		r, n := utf8.decode_rune(bytes[:count])
+		if text_field_printable(r) && (r != utf8.RUNE_ERROR || n != 1) {
+			copy(field.buffer[out:out+n], bytes[:n])
+			out += n
+		}
+		offset += n
+	}
+}
+
 // text_field_insert_string inserts all accepted runes atomically; it returns
-// false if they do not fit or text overlaps the field's buffer. Invalid UTF-8
-// bytes and C0/C1 controls are discarded. An empty insertion succeeds.
+// false if they do not fit. A source overlapping the buffer must be entirely
+// within its current text. Invalid bytes and C0/C1 controls are discarded.
+// An empty insertion succeeds.
 text_field_insert_string :: proc(field: ^Text_Field, text: string) -> bool {
 	bytes, runes := text_field_measure(text)
-	if bytes > len(field.buffer)-field.length || text_field_overlaps(field, text) {
+	if bytes > len(field.buffer)-field.length {
 		return false
 	}
-	if field.max_runes > 0 {
+	if runes > 0 && field.max_runes > 0 {
 		existing := utf8.rune_count(text_field_text(field))
 		if existing > field.max_runes || runes > field.max_runes-existing {
 			return false
 		}
 	}
+	alias := text_field_overlaps(field, text)
+	start := 0
+	if alias {
+		a, b := uintptr(raw_data(field.buffer)), uintptr(raw_data(text))
+		if b < a || b-a > uintptr(field.length) {
+			return false
+		}
+		start = int(b-a)
+		if len(text) > field.length-start {
+			return false
+		}
+	}
 	copy(field.buffer[field.cursor+bytes:field.length+bytes],
 	     field.buffer[field.cursor:field.length])
-	text_field_copy(field.buffer[field.cursor:field.cursor+bytes], text)
+	if alias {
+		text_field_copy_alias(field, text, start, bytes)
+	} else {
+		text_field_copy(field.buffer[field.cursor:field.cursor+bytes], text)
+	}
 	field.length += bytes
 	field.cursor += bytes
 	return true
@@ -116,11 +194,10 @@ text_field_insert_rune :: proc(field: ^Text_Field, r: rune) -> bool {
 }
 
 // text_field_set_text atomically replaces the text and moves the cursor to
-// the end; it has the same filtering and non-overlap rule as insertion.
+// the end. The source may overlap the buffer.
 text_field_set_text :: proc(field: ^Text_Field, text: string) -> bool {
 	bytes, runes := text_field_measure(text)
-	if bytes > len(field.buffer) || (field.max_runes > 0 && runes > field.max_runes) ||
-	   text_field_overlaps(field, text) {
+	if bytes > len(field.buffer) || (field.max_runes > 0 && runes > field.max_runes) {
 		return false
 	}
 	text_field_copy(field.buffer[:bytes], text)
