@@ -460,7 +460,7 @@ ansi_draw_run :: proc(data: rawptr, x, y: int, cells: []Cell) -> bool {
 			width = 2
 		} else if glyph == CONTINUATION {
 			glyph = ' '
-		} else if !ansi_single_column(glyph) {
+		} else if rune_width(glyph) != 1 || !ansi_single_column(glyph) {
 			glyph = state.replacement
 			if !ansi_single_column(glyph) {
 				glyph = '?'
