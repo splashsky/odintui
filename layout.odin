@@ -234,6 +234,68 @@ layout_take :: proc(layout: ^Layout, size: int) -> Rect {
 	return result
 }
 
+// layout_take_end takes from the right or bottom, consuming the preceding gap.
+// Non-positive sizes and empty bounds do not advance the cursor. Coordinates
+// beyond max(int) are inaccessible and are discarded before a positive take.
+layout_take_end :: proc(layout: ^Layout, size: int) -> Rect {
+	result := layout.remaining
+	if layout.axis == .Row {
+		result.x = layout_end_coordinate(result.x, max(result.width, 0))
+		result.width = 0
+	} else {
+		result.y = layout_end_coordinate(result.y, max(result.height, 0))
+		result.height = 0
+	}
+	if size <= 0 || layout.remaining.width <= 0 || layout.remaining.height <= 0 {
+		return result
+	}
+
+	if layout.axis == .Row {
+		origin := layout.remaining.x
+		extent := layout.remaining.width
+		if origin > max(int)-(extent-1) {
+			extent = max(int)-origin+1
+		}
+		result.width = min(size, extent)
+		result.x = origin + (extent - result.width)
+		layout.remaining.width = extent - result.width
+		layout.remaining.width -= min(max(layout.gap, 0), layout.remaining.width)
+	} else {
+		origin := layout.remaining.y
+		extent := layout.remaining.height
+		if origin > max(int)-(extent-1) {
+			extent = max(int)-origin+1
+		}
+		result.height = min(size, extent)
+		result.y = origin + (extent - result.height)
+		layout.remaining.height = extent - result.height
+		layout.remaining.height -= min(max(layout.gap, 0), layout.remaining.height)
+	}
+	return result
+}
+
+// layout_take_rest returns all remaining bounds and exhausts the cursor
+// without consuming a gap, even if the other dimension is empty.
+layout_take_rest :: proc(layout: ^Layout) -> Rect {
+	result := layout.remaining
+	if layout.axis == .Row {
+		layout_advance(&layout.remaining.x, &layout.remaining.width, layout.remaining.width)
+		layout.remaining.width = 0
+	} else {
+		layout_advance(&layout.remaining.y, &layout.remaining.height, layout.remaining.height)
+		layout.remaining.height = 0
+	}
+	return result
+}
+
+@(private)
+layout_end_coordinate :: proc(origin, extent: int) -> int {
+	if origin > max(int)-extent {
+		return max(int)
+	}
+	return origin + extent
+}
+
 @(private)
 layout_advance :: proc(origin, extent: ^int, amount: int) {
 	if amount <= 0 {

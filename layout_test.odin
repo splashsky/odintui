@@ -123,8 +123,58 @@ layout_test_split_does_not_allocate :: proc(t: ^testing.T) {
 		.Row,
 		[3]Constraint{layout_fill(1, 0, 1), layout_fill(), layout_fill(3)},
 	)
+	cursor := layout_init(Rect{0, 0, 10, 1}, .Row, 1)
+	end := layout_take_end(&cursor, 2)
+	rest := layout_take_rest(&cursor)
 	testing.expect(t, parts[2] == Rect{4, 0, 6, 1})
+	testing.expect(t, end == Rect{8, 0, 2, 1} && rest == Rect{0, 0, 7, 1})
 	testing.expect(t, attempts == 0)
+}
+
+@(test)
+layout_test_take_end_and_rest :: proc(t: ^testing.T) {
+	cursor := layout_init(Rect{2, 3, 12, 4}, .Row, 2)
+	testing.expect(t, layout_take_end(&cursor, 3) == Rect{11, 3, 3, 4})
+	testing.expect(t, layout_remaining(&cursor) == Rect{2, 3, 7, 4})
+	testing.expect(t, layout_take(&cursor, 2) == Rect{2, 3, 2, 4})
+	testing.expect(t, layout_take_end(&cursor, 0) == Rect{9, 3, 0, 4})
+	testing.expect(t, layout_take_end(&cursor, -1) == Rect{9, 3, 0, 4})
+	testing.expect(t, layout_remaining(&cursor) == Rect{6, 3, 3, 4})
+	testing.expect(t, layout_take_rest(&cursor) == Rect{6, 3, 3, 4})
+	testing.expect(t, layout_remaining(&cursor) == Rect{9, 3, 0, 4})
+	testing.expect(t, layout_take_rest(&cursor) == Rect{9, 3, 0, 4})
+
+	column := layout_init(Rect{-1, 2, 5, 8}, .Column, 1)
+	testing.expect(t, layout_take(&column, 1) == Rect{-1, 2, 5, 1})
+	testing.expect(t, layout_take_end(&column, 2) == Rect{-1, 8, 5, 2})
+	testing.expect(t, layout_take_rest(&column) == Rect{-1, 4, 5, 3})
+	testing.expect(t, layout_remaining(&column) == Rect{-1, 7, 5, 0})
+
+	empty := layout_init(Rect{1, 2, 0, 8}, .Column)
+	testing.expect(t, layout_take_end(&empty, 2) == Rect{1, 10, 0, 0})
+	testing.expect(t, layout_remaining(&empty) == Rect{1, 2, 0, 8})
+	testing.expect(t, layout_take_rest(&empty) == Rect{1, 2, 0, 8})
+	testing.expect(t, layout_remaining(&empty) == Rect{1, 10, 0, 0})
+}
+
+@(test)
+layout_test_take_end_extreme :: proc(t: ^testing.T) {
+	cursor := layout_init(Rect{max(int)-1, 0, 8, 1}, .Row, 1)
+	testing.expect(t, layout_take_end(&cursor, 0) == Rect{max(int), 0, 0, 1})
+	testing.expect(t, layout_take_end(&cursor, 1) == Rect{max(int), 0, 1, 1})
+	testing.expect(t, layout_remaining(&cursor) == Rect{max(int)-1, 0, 0, 1})
+
+	cursor = layout_init(Rect{0, max(int), 1, max(int)}, .Column)
+	testing.expect(t, layout_take_end(&cursor, max(int)) == Rect{0, max(int), 1, 1})
+	testing.expect(t, layout_remaining(&cursor) == Rect{0, max(int), 1, 0})
+
+	cursor = layout_init(Rect{min(int), 0, max(int), 1}, .Row, max(int))
+	testing.expect(t, layout_take_end(&cursor, 1) == Rect{-2, 0, 1, 1})
+	testing.expect(t, layout_remaining(&cursor) == Rect{min(int), 0, 0, 1})
+
+	cursor = layout_init(Rect{max(int)-1, 0, 10, 1}, .Row)
+	testing.expect(t, layout_take_rest(&cursor) == Rect{max(int)-1, 0, 10, 1})
+	testing.expect(t, layout_remaining(&cursor) == Rect{max(int), 0, 0, 1})
 }
 
 @(test)
