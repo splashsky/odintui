@@ -137,7 +137,7 @@ text_field_test_paste :: proc(t: ^testing.T) {
 	field := text_field_init(buffer[:], "a")
 	start := text_field_handle(&field, Paste_Event{kind = .Start})
 	testing.expect(t, start.handled && !start.changed)
-	chunk := transmute([]byte)string("é\n\t\x00🙂")
+	chunk := transmute([]byte)string("é\n\t\x00\u2028\u2029🙂")
 	result := text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
 	testing.expect(t, result.handled && result.changed && text_field_text(&field) == "aé🙂")
 	chunk = transmute([]byte)string("\xe7\x95")

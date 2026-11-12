@@ -15,7 +15,8 @@ Text_Field :: struct {
 }
 
 // text_field_init copies as much initial text as fits, without splitting a
-// rune. Invalid UTF-8 and C0/C1 controls are discarded, as for insertion.
+// rune. Invalid UTF-8, C0/C1 controls and Unicode line/paragraph separators
+// are discarded, as for insertion.
 // Initial text may overlap the buffer.
 text_field_init :: proc(buffer: []byte, initial := "") -> Text_Field {
 	field := Text_Field{buffer = buffer}
@@ -45,7 +46,8 @@ text_field_text :: proc(field: ^Text_Field) -> string {
 
 @(private)
 text_field_printable :: proc(r: rune) -> bool {
-	return utf8.valid_rune(r) && r >= 0x20 && !(r >= 0x7f && r <= 0x9f)
+	return utf8.valid_rune(r) && r >= 0x20 && !(r >= 0x7f && r <= 0x9f) &&
+	       r != 0x2028 && r != 0x2029
 }
 
 @(private)
@@ -146,8 +148,8 @@ text_field_copy_alias :: proc(field: ^Text_Field, text: string, start, added: in
 
 // text_field_insert_string inserts all accepted runes atomically; it returns
 // false if they do not fit. A source overlapping the buffer must be entirely
-// within its current text. Invalid bytes and C0/C1 controls are discarded.
-// An empty insertion succeeds.
+// within its current text. Invalid bytes, C0/C1 controls and Unicode
+// line/paragraph separators are discarded. An empty insertion succeeds.
 text_field_insert_string :: proc(field: ^Text_Field, text: string) -> bool {
 	bytes, runes := text_field_measure(text)
 	if bytes > len(field.buffer)-field.length {
@@ -184,7 +186,8 @@ text_field_insert_string :: proc(field: ^Text_Field, text: string) -> bool {
 }
 
 // text_field_insert_rune inserts a printable scalar atomically; controls and
-// invalid scalars are ignored and count as a successful empty insertion.
+// invalid scalars and line/paragraph separators are ignored and count as a
+// successful empty insertion.
 text_field_insert_rune :: proc(field: ^Text_Field, r: rune) -> bool {
 	if !text_field_printable(r) {
 		return true
@@ -349,9 +352,10 @@ Text_Field_Result :: struct {
 
 // text_field_handle applies supported key bindings and paste events. Paste
 // chunks are atomic and independently decoded: invalid bytes, including bytes
-// of UTF-8 split between chunks, and controls are discarded. Paste boundaries
-// are consumed. Unsupported events and modifier combinations are unhandled;
-// recognized events remain handled even if an edit is blocked by capacity.
+// of UTF-8 split between chunks, controls, and line/paragraph separators are
+// discarded. Paste boundaries are consumed. Unsupported events and modifier
+// combinations are unhandled; recognized events remain handled even if an
+// edit is blocked by capacity.
 text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_Result {
 	paste, is_paste := event.(Paste_Event)
 	if is_paste {
