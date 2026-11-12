@@ -12,11 +12,16 @@ rgb :: proc(r, g, b: u8) -> Color {
 	return {r, g, b, true}
 }
 
+// Attribute is a cell style flag; backends decide how to render it.
 Attribute :: enum {
 	Bold,
 	Italic,
 	Underline,
 	Reverse,
+	Dim,
+	Blink,
+	Hidden,
+	Strikethrough,
 }
 
 Style :: struct {

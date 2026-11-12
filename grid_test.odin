@@ -284,3 +284,25 @@ test_grid_fill_dirty_ranges_and_render :: proc(t: ^testing.T) {
 	testing.expect(t, mock.calls[count+3] == Call{2, 1, 1})
 	pop_clip(&grid)
 }
+
+@(test)
+test_grid_extended_attributes_render :: proc(t: ^testing.T) {
+	grid, err := grid_init(1, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+	style := Style{attributes = {.Bold, .Italic, .Underline, .Reverse,
+	                            .Dim, .Blink, .Hidden, .Strikethrough}}
+	set_cell(&grid, 0, 0, {'x', style})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.screen[0][0] == Cell{'x', style})
+	set_cell(&grid, 0, 0, {'x', style})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == 2)
+	style.attributes -= {.Strikethrough, .Hidden}
+	set_cell(&grid, 0, 0, {'x', style})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == 3 && mock.screen[0][0] == Cell{'x', style})
+}
