@@ -1,5 +1,6 @@
 package odintui
 
+import "core:unicode"
 import "core:unicode/utf8"
 
 // Text_Field borrows buffer for its lifetime. Only max_runes may be modified
@@ -159,5 +160,103 @@ text_field_delete :: proc(field: ^Text_Field) -> bool {
 	}
 	_, size := utf8.decode_rune(field.buffer[field.cursor:field.length])
 	text_field_remove(field, field.cursor, field.cursor+size)
+	return true
+}
+
+@(private)
+text_field_prev :: proc(field: ^Text_Field, offset: int) -> int {
+	prev := offset-1
+	for prev > 0 && field.buffer[prev] & 0xc0 == 0x80 {
+		prev -= 1
+	}
+	return prev
+}
+
+@(private)
+text_field_space_at :: proc(field: ^Text_Field, offset: int) -> bool {
+	r, _ := utf8.decode_rune(field.buffer[offset:field.length])
+	return unicode.is_space(r)
+}
+
+// text_field_left moves one rune to the left.
+text_field_left :: proc(field: ^Text_Field) {
+	if field.cursor > 0 {
+		field.cursor = text_field_prev(field, field.cursor)
+	}
+}
+
+// text_field_right moves one rune to the right.
+text_field_right :: proc(field: ^Text_Field) {
+	if field.cursor < field.length {
+		_, size := utf8.decode_rune(field.buffer[field.cursor:field.length])
+		field.cursor += size
+	}
+}
+
+// text_field_home moves the cursor to the beginning.
+text_field_home :: proc(field: ^Text_Field) {
+	field.cursor = 0
+}
+
+// text_field_end moves the cursor to the end.
+text_field_end :: proc(field: ^Text_Field) {
+	field.cursor = field.length
+}
+
+// text_field_word_left skips whitespace and then the preceding non-whitespace
+// run. Words are delimited by Unicode whitespace, not punctuation.
+text_field_word_left :: proc(field: ^Text_Field) {
+	for field.cursor > 0 {
+		prev := text_field_prev(field, field.cursor)
+		if !text_field_space_at(field, prev) {
+			break
+		}
+		field.cursor = prev
+	}
+	for field.cursor > 0 {
+		prev := text_field_prev(field, field.cursor)
+		if text_field_space_at(field, prev) {
+			break
+		}
+		field.cursor = prev
+	}
+}
+
+// text_field_word_right skips whitespace and then the next non-whitespace run.
+text_field_word_right :: proc(field: ^Text_Field) {
+	for field.cursor < field.length && text_field_space_at(field, field.cursor) {
+		text_field_right(field)
+	}
+	for field.cursor < field.length && !text_field_space_at(field, field.cursor) {
+		text_field_right(field)
+	}
+}
+
+// text_field_delete_word_backward removes the preceding word and whitespace.
+text_field_delete_word_backward :: proc(field: ^Text_Field) -> bool {
+	end := field.cursor
+	text_field_word_left(field)
+	if end == field.cursor {
+		return false
+	}
+	text_field_remove(field, field.cursor, end)
+	return true
+}
+
+// text_field_delete_to_start removes all text preceding the cursor.
+text_field_delete_to_start :: proc(field: ^Text_Field) -> bool {
+	if field.cursor == 0 {
+		return false
+	}
+	text_field_remove(field, 0, field.cursor)
+	return true
+}
+
+// text_field_delete_to_end removes all text from the cursor onwards.
+text_field_delete_to_end :: proc(field: ^Text_Field) -> bool {
+	if field.cursor == field.length {
+		return false
+	}
+	field.length = field.cursor
 	return true
 }
