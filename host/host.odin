@@ -20,6 +20,7 @@ signal_number: i32
 resized: i32
 
 on_signal :: proc "c" (sig: posix.Signal) {
+	saved_errno := posix.errno()
 	if sig == posix.Signal(posix.SIGWINCH) {
 		intrinsics.atomic_store(&resized, 1)
 	} else {
@@ -30,6 +31,7 @@ on_signal :: proc "c" (sig: posix.Signal) {
 		b := byte(1)
 		_ = posix.write(posix.FD(fd), &b, 1)
 	}
+	posix.errno(saved_errno)
 }
 
 Host :: struct {

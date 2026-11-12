@@ -21,3 +21,15 @@ poll_rejects_unopened :: proc(t: ^testing.T) {
 	testing.expect(t, poll(&h, nil, 0).error)
 	close(&h)
 }
+
+@(test)
+poll_caller_descriptor :: proc(t: ^testing.T) {
+	h: Host
+	testing.expect(t,posix.pipe(&h.pipe) == .OK); h.pipe_open = true; defer close(&h)
+	p: [2]posix.FD
+	testing.expect(t,posix.pipe(&p) == .OK); defer posix.close(p[0]); defer posix.close(p[1])
+	b := byte(42); testing.expect(t,posix.write(p[1],&b,1) == 1)
+	fds := [1]posix.pollfd{{fd=p[0],events={.IN}}}
+	r := poll(&h,fds[:],100)
+	testing.expect(t,!r.error && .IN in fds[0].revents)
+}
