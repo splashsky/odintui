@@ -130,8 +130,16 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 			}
 			return Key_Event{key = .Escape}, 1
 		}
-		if data[1] == '[' || data[1] == 'O' {
-			event, consumed := input_sequence(parser, data)
+		if data[1] == '[' || data[1] == 'O' ||
+		   data[1] == ']' || data[1] == 'P' || data[1] == 'X' ||
+		   data[1] == '^' || data[1] == '_' || (data[1] >= 0x20 && data[1] <= 0x2f) {
+			event: Input_Event
+			consumed: int
+			if data[1] == '[' || data[1] == 'O' {
+				event, consumed = input_sequence(parser, data)
+			} else {
+				event, consumed = input_other_escape(data)
+			}
 			if consumed > 0 {
 				return event, consumed
 			}
@@ -151,6 +159,30 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 		return nil, 0
 	}
 	return event, consumed
+}
+
+@(private)
+input_other_escape :: proc(data: []byte) -> (Input_Event, int) {
+	if data[1] >= 0x20 && data[1] <= 0x2f {
+		for i := 2; i < len(data); i += 1 {
+			if data[i] >= 0x30 && data[i] <= 0x7e {
+				return Key_Event{key = .Unknown}, i+1
+			}
+			if data[i] < 0x20 || data[i] > 0x2f {
+				return Key_Event{key = .Unknown}, i
+			}
+		}
+	} else {
+		for i := 2; i < len(data); i += 1 {
+			if data[1] == ']' && data[i] == 7 {
+				return Key_Event{key = .Unknown}, i+1
+			}
+			if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '\\' {
+				return Key_Event{key = .Unknown}, i+2
+			}
+		}
+	}
+	return nil, 0
 }
 
 // input_next advances pending past one decoded event. It can be used as an
@@ -396,12 +428,18 @@ input_sequence_key :: proc(params: []byte, final: byte) -> Key_Event {
 
 @(private)
 input_kitty_key :: proc(code: int, mods: Modifiers) -> Key_Event {
+	if (code >= 0 && code < 32) || code == 127 {
+		data := [1]byte{byte(code)}
+		event, _ := input_key(data[:], true)
+		event.modifiers += mods
+		return event
+	}
 	event := Key_Event{key = .Rune, modifiers = mods}
 	switch code {
-	case 27, 57344: event.key = .Escape
-	case 13, 57345: event.key = .Enter
-	case 9, 57346:  event.key = .Tab
-	case 127, 57347: event.key = .Backspace
+	case 57344: event.key = .Escape
+	case 57345: event.key = .Enter
+	case 57346: event.key = .Tab
+	case 57347: event.key = .Backspace
 	case 57348: event.key = .Insert
 	case 57349: event.key = .Delete
 	case 57350: event.key = .Left

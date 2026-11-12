@@ -99,6 +99,10 @@ input_test_escape_keys :: proc(t: ^testing.T) {
 		{"\x1b[97;5u", {.Rune, 'a', {.Ctrl}}},
 		{"\x1b[128578;3u", {.Rune, '🙂', {.Alt}}},
 		{"\x1b[27u", {key = .Escape}},
+		{"\x1b[0u", {.Rune, ' ', {.Ctrl}}},
+		{"\x1b[3;3u", {.Rune, 'c', {.Alt, .Ctrl}}},
+		{"\x1b[8;5u", {key = .Backspace, modifiers = {.Ctrl}}},
+		{"\x1b[10u", {key = .Enter}},
 		{"\x1b[57352;2u", {key = .Up, modifiers = {.Shift}}},
 		{"\x1b[57375u", {key = .F12}},
 		{"\x1b[99999999999999999999999999999~", {key = .Unknown}},
@@ -119,6 +123,39 @@ input_test_escape_keys :: proc(t: ^testing.T) {
 		key, ok := event.(Key_Event)
 		testing.expect(t, ok && key == c.expected && consumed == len(data))
 	}
+}
+
+@(test)
+input_test_unknown_escape_strings :: proc(t: ^testing.T) {
+	parser: Input_Parser
+	cases := []string{
+		"\x1b]0;title\x07",
+		"\x1b]0;title\x1b\\",
+		"\x1bP1;2|payload\x1b\\",
+		"\x1b(0",
+		"\x1b#8",
+	}
+	for text in cases {
+		data := transmute([]byte)text
+		for i in 1..<len(data) {
+			_, consumed := input_parse(&parser, data[:i])
+			testing.expect(t, consumed == 0)
+		}
+		event, consumed := input_parse(&parser, data)
+		key, ok := event.(Key_Event)
+		testing.expect(t, ok && key.key == .Unknown && consumed == len(data))
+	}
+	data := transmute([]byte)string("\x1b]unfinished")
+	event, consumed := input_parse(&parser, data, true)
+	key, ok := event.(Key_Event)
+	testing.expect(t, ok && key == Key_Event{.Rune, ']', {.Alt}} && consumed == 2)
+	data = transmute([]byte)string("\x1b[\x1bx")
+	event, consumed = input_parse(&parser, data)
+	key, ok = event.(Key_Event)
+	testing.expect(t, ok && key.key == .Unknown && consumed == 2)
+	event, consumed = input_parse(&parser, data[consumed:])
+	key, ok = event.(Key_Event)
+	testing.expect(t, ok && key == Key_Event{.Rune, 'x', {.Alt}} && consumed == 2)
 }
 
 @(test)
