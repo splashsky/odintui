@@ -3,6 +3,8 @@
 `host.open(&h, modes = host.DEFAULT_MODES) -> bool` acquires stdin/stdout,
 enters raw mode and the ANSI modes. Always `defer host.close(&h)` even if
 opening fails. One host per process: signal handlers are process-wide.
+Set `h.ansi.writer` before `open` to provide a caller-owned writer; otherwise
+the host uses stdout. A buffered writer must also flush the enter/leave bytes.
 `host.size() -> (width, height: int)` queries the terminal (80×24 fallback).
 
 `host.poll(&h, fds: []posix.pollfd, timeout_ms: i32) -> Poll_Result` polls

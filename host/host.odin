@@ -87,7 +87,7 @@ open :: proc(h: ^Host, modes := DEFAULT_MODES) -> bool {
 	raw := raw_attributes(h.saved)
 	if !set_attributes(&raw) { return false }
 	h.raw = true
-	h.ansi.writer = os.to_writer(os.stdout)
+	if h.ansi.writer.procedure == nil { h.ansi.writer = os.to_writer(os.stdout) }
 	h.modes = modes
 	h.entered = true // a failed write may have partially entered
 	return tui.ansi_enter(&h.ansi, modes)
