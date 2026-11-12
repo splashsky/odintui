@@ -174,6 +174,41 @@ layout_split_n :: proc(
 	return result
 }
 
+// layout_cell returns a cell in a uniform grid, distributing remainder cells
+// left/top first. Gaps are clipped to bounds; negative extents and gaps are
+// zero. Invalid dimensions or indices return an empty rect at bounds' origin.
+// Inaccessible coordinates beyond max(int) are discarded as in layout_split.
+layout_cell :: proc(
+	bounds: Rect,
+	columns, rows, column, row: int,
+	gap_x: int = 0,
+	gap_y: int = 0,
+) -> Rect {
+	if columns <= 0 || rows <= 0 || column < 0 || column >= columns || row < 0 || row >= rows {
+		return {x = bounds.x, y = bounds.y}
+	}
+	x, width := layout_cell_axis(bounds.x, max(bounds.width, 0), columns, column, max(gap_x, 0))
+	y, height := layout_cell_axis(bounds.y, max(bounds.height, 0), rows, row, max(gap_y, 0))
+	return {x, y, width, height}
+}
+
+@(private)
+layout_cell_axis :: proc(origin, extent, count, index, gap: int) -> (int, int) {
+	gaps := min(u128(extent), u128(gap) * u128(count-1))
+	available := extent - int(gaps)
+	base := available / count
+	remainder := available % count
+	size := base
+	if index < remainder {
+		size += 1
+	}
+	offset := u128(index) * (u128(base) + u128(gap)) + u128(min(index, remainder))
+	remaining := extent
+	position := origin
+	layout_advance(&position, &remaining, int(min(u128(extent), offset)))
+	return position, min(size, remaining)
+}
+
 @(private)
 layout_fill_limit :: proc(constraint: Constraint) -> int {
 	if constraint.max_size <= 0 {

@@ -126,9 +126,65 @@ layout_test_split_does_not_allocate :: proc(t: ^testing.T) {
 	cursor := layout_init(Rect{0, 0, 10, 1}, .Row, 1)
 	end := layout_take_end(&cursor, 2)
 	rest := layout_take_rest(&cursor)
+	cell := layout_cell(Rect{2, 3, 10, 4}, 3, 2, 1, 1, 1, 0)
 	testing.expect(t, parts[2] == Rect{4, 0, 6, 1})
 	testing.expect(t, end == Rect{8, 0, 2, 1} && rest == Rect{0, 0, 7, 1})
+	testing.expect(t, cell == Rect{6, 5, 3, 2})
 	testing.expect(t, attempts == 0)
+}
+
+@(test)
+layout_test_grid_cells :: proc(t: ^testing.T) {
+	bounds := Rect{2, 3, 12, 9}
+	testing.expect(t, layout_cell(bounds, 3, 3, 0, 0, 1, 1) == Rect{2, 3, 4, 3})
+	testing.expect(t, layout_cell(bounds, 3, 3, 1, 1, 1, 1) == Rect{7, 7, 3, 2})
+	testing.expect(t, layout_cell(bounds, 3, 3, 2, 2, 1, 1) == Rect{11, 10, 3, 2})
+	testing.expect(t, layout_cell(bounds, 0, 3, 0, 0) == Rect{2, 3, 0, 0})
+	testing.expect(t, layout_cell(bounds, 3, -1, 0, 0) == Rect{2, 3, 0, 0})
+	testing.expect(t, layout_cell(bounds, 3, 3, -1, 0) == Rect{2, 3, 0, 0})
+	testing.expect(t, layout_cell(bounds, 3, 3, 3, 1) == Rect{2, 3, 0, 0})
+	testing.expect(t, layout_cell(bounds, 3, 3, 1, 3) == Rect{2, 3, 0, 0})
+	testing.expect(t, layout_cell(Rect{0, 0, 2, 2}, 4, 4, 2, 2) == Rect{2, 2, 0, 0})
+	testing.expect(t, layout_cell(Rect{0, 0, 3, 3}, 2, 2, 1, 1, -3, -4) == Rect{2, 2, 1, 1})
+	testing.expect(t, layout_cell(Rect{0, 0, -3, -3}, 2, 2, 1, 1) == Rect{})
+}
+
+@(test)
+layout_test_grid_extremes :: proc(t: ^testing.T) {
+	testing.expect(
+		t,
+		layout_cell(Rect{min(int), 0, max(int), 1}, max(int), 1, max(int)-1, 0) ==
+		Rect{-2, 0, 1, 1},
+	)
+	testing.expect(
+		t,
+		layout_cell(Rect{min(int), 0, max(int), 1}, max(int), 1, 2, 0, max(int)) ==
+		Rect{-1, 0, 0, 1},
+	)
+	testing.expect(
+		t,
+		layout_cell(Rect{max(int)-1, max(int)-1, 10, 10}, 5, 5, 0, 0) ==
+		Rect{max(int)-1, max(int)-1, 2, 2},
+	)
+	testing.expect(
+		t,
+		layout_cell(Rect{max(int)-1, max(int)-1, 10, 10}, 5, 5, 1, 1) ==
+		Rect{max(int), max(int), 0, 0},
+	)
+	testing.expect(t, layout_cell(Rect{1, 1, 3, 3}, 3, 3, 2, 2, max(int), max(int)) == Rect{4, 4, 0, 0})
+}
+
+@(test)
+layout_test_grid_matches_splits :: proc(t: ^testing.T) {
+	constraints := [3]Constraint{layout_fill(), layout_fill(), layout_fill()}
+	for width in 0..<12 {
+		for gap in 0..<5 {
+			parts := layout_split_n(Rect{-5, 1, width, 2}, .Row, constraints, gap)
+			for column in 0..<3 {
+				testing.expect(t, layout_cell(Rect{-5, 1, width, 2}, 3, 1, column, 0, gap) == parts[column])
+			}
+		}
+	}
 }
 
 @(test)
