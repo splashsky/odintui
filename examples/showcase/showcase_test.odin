@@ -56,6 +56,11 @@ test_scrolling_and_slider_mouse :: proc(t: ^testing.T) {
 	app_init(&app)
 	app_draw(&grid, &app)
 	testing.expect(t, app.text.height > app.text.viewport.height)
+	first, _ := tui.get_cell(&grid, app.text.viewport.x, app.text.viewport.y)
+	app.text.offset = 1
+	app_draw(&grid, &app)
+	scrolled, _ := tui.get_cell(&grid, app.text.viewport.x, app.text.viewport.y)
+	testing.expect(t, first.glyph != scrolled.glyph)
 	track := app.text.track
 	app_event(&app, tui.Mouse_Event{
 		x = track.x, y = track.y+track.height-1, button = .Left, action = .Press,
@@ -75,7 +80,7 @@ test_scrolling_and_slider_mouse :: proc(t: ^testing.T) {
 	})
 	testing.expect(t, app.focused == .Controls && app.controls.value == 1)
 	app_event(&app, tui.Mouse_Event{
-		x = slider.x-5, y = slider.y, button = .Left, action = .Drag,
+		x = slider.x-5, y = slider.y+20, button = .Left, action = .Drag,
 	})
 	testing.expect(t, app.controls.value == 0)
 }
@@ -103,19 +108,25 @@ test_partial_input_and_escape_timeout :: proc(t: ^testing.T) {
 
 @(test)
 test_paste_split_utf8 :: proc(t: ^testing.T) {
-	form: Form_Panel_State
-	form_init(&form)
-	form.editing = true
-	_ = form_event(&form, tui.Paste_Event{kind = .Start})
-	first := [2]byte{'A', 0xe2}
-	second := [1]byte{0x82}
-	third := [2]byte{0xac, 'B'}
-	_ = form_event(&form, tui.Paste_Event{kind = .Chunk, text = first[:]})
-	_ = form_event(&form, tui.Paste_Event{kind = .Chunk, text = second[:]})
-	_ = form_event(&form, tui.Paste_Event{kind = .Chunk, text = third[:]})
-	_ = form_event(&form, tui.Paste_Event{kind = .End})
-	testing.expect(t, tui.text_field_text(&form.name) == "A€B")
-	testing.expect(t, form.paste_n == 0)
+	app: App
+	app_init(&app)
+	app_focus(&app, .Form)
+	term: Terminal
+	first := [8]byte{0x1b, '[', '2', '0', '0', '~', 'A', 0xe2}
+	copy(term.pending[:], first[:])
+	term.count = len(first)
+	testing.expect(t, terminal_parse(&term, &app, false) && term.count == 1)
+	second := [9]byte{0x82, 0xac, 'B', 0x1b, '[', '2', '0', '1', '~'}
+	copy(term.pending[term.count:], second[:])
+	term.count += len(second)
+	testing.expect(t, terminal_parse(&term, &app, false) && term.count == 0)
+	testing.expect(t, tui.text_field_text(&app.form.name) == "A€B")
+	overflow: [150]byte
+	for &byte_value in overflow {
+		byte_value = 'z'
+	}
+	app_event(&app, tui.Paste_Event{kind = .Chunk, text = overflow[:]})
+	testing.expect(t, app.form.name.length == len(app.form.name_buffer))
 }
 
 @(test)
@@ -146,15 +157,15 @@ test_table_row_and_scrollbar :: proc(t: ^testing.T) {
 	state: Table_Panel_State
 	bounds := tui.grid_bounds(&grid)
 	draw_table_panel(&grid, bounds, &state, true)
-	body := state.body
-	last_size, _ := tui.get_cell(&grid, body.x+body.width-2, body.y)
+	content := tui.box_content(bounds)
+	last_size, _ := tui.get_cell(&grid, content.x+content.width-2, content.y+2)
 	testing.expect(t, last_size.glyph == 'B')
 	table_event(&state, bounds, tui.Mouse_Event{
-		x = body.x+2, y = body.y+2, button = .Left, action = .Press,
+		x = content.x+2, y = content.y+4, button = .Left, action = .Press,
 	})
 	testing.expect(t, state.list.selected == 2)
 	table_event(&state, bounds, tui.Mouse_Event{
-		x = bounds.x+bounds.width-2, y = body.y+body.height-1, button = .Left, action = .Press,
+		x = content.x+content.width-1, y = content.y+content.height-1, button = .Left, action = .Press,
 	})
 	testing.expect(t, state.list.offset > 0 && state.list.selected >= state.list.offset)
 	table_event(&state, bounds, tui.Key_Event{key = .End})
@@ -179,8 +190,8 @@ test_pages_focus_and_batched_events :: proc(t: ^testing.T) {
 	testing.expect(t, app.files.list.selected == FILE_COUNT-1)
 	testing.expect(t, strings.contains(string(app.status[:app.status_n]), "list_test.odin"))
 	table := app.bounds[int(Panel.Table)]
-	body := tui.rect_inset(tui.box_content(table), tui.Insets{top = 2})
-	app_event(&app, tui.Mouse_Event{x = body.x+1, y = body.y+2, button = .Left, action = .Press})
+	content := tui.box_content(table)
+	app_event(&app, tui.Mouse_Event{x = content.x+1, y = content.y+4, button = .Left, action = .Press})
 	testing.expect(t, app.focused == .Table && app.table.list.selected == 2)
 	app_event(&app, tui.Key_Event{key = .Tab, modifiers = {.Shift}})
 	testing.expect(t, app.focused == .Files)

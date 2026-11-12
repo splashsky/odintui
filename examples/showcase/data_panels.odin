@@ -104,7 +104,6 @@ files_event :: proc(state: ^Files_Panel_State, bounds: tui.Rect, event: tui.Inpu
 
 Table_Panel_State :: struct {
 	list: tui.List_State,
-	body: tui.Rect,
 }
 
 table_columns :: proc() -> [4]tui.Table_Column {
@@ -120,8 +119,6 @@ table_options :: proc() -> tui.Table_Options {
 	return {
 		borderless = true,
 		scrollbar = true,
-		// In a borderless table the scrollbar overlays the last body column.
-		padding = 1,
 		header_style = {fg = color("#61dafb"), attributes = {.Bold}},
 		border_style = {fg = color("#718096")},
 		selected_style = {bg = color("#314b65"), fg = color("#ffffff")},
@@ -137,27 +134,12 @@ draw_table_panel :: proc(grid: ^tui.Grid, bounds: tui.Rect, state: ^Table_Panel_
 	for &row, i in rows {
 		row = data[i][:]
 	}
-	state.body = tui.draw_table(grid, content, columns[:], rows[:], &state.list, table_options())
+	_ = tui.draw_table(grid, content, columns[:], rows[:], &state.list, table_options())
 }
 
 table_event :: proc(state: ^Table_Panel_State, bounds: tui.Rect, event: tui.Input_Event) {
-	content := tui.box_content(bounds)
-	// With the borderless, headed table above, the body starts after two header rows.
-	body := tui.rect_inset(content, tui.Insets{top = 2})
-	options := data_list_options()
-	if mouse, ok := event.(tui.Mouse_Event); ok && mouse.button == .Left && mouse.action == .Press {
-		copy := state.list
-		view := tui.list_begin(&copy, len(DATA_ROWS), body, options)
-		if !tui.rect_contains(view.scrollbar, mouse.x, mouse.y) {
-			columns := table_columns()
-			if row, hit := tui.table_row_at(
-				content, columns[:], len(DATA_ROWS), &state.list, mouse.x, mouse.y, table_options(),
-			); hit {
-				state.list.selected = row
-				_ = tui.list_begin(&state.list, len(DATA_ROWS), body, options)
-			}
-			return
-		}
-	}
-	_ = tui.list_handle(&state.list, len(DATA_ROWS), body, event, options)
+	columns := table_columns()
+	_ = tui.table_handle(
+		&state.list, tui.box_content(bounds), columns[:], len(DATA_ROWS), event, table_options(),
+	)
 }
