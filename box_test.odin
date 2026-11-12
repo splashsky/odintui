@@ -108,3 +108,55 @@ box_test_drawing_does_not_allocate :: proc(t: ^testing.T) {
 	testing.expect(t, state.remaining == 0 && content == Rect{2, 1, 4, 1})
 	box_test_cell(t, &grid, 2, 0, {'é', {}})
 }
+
+@(test)
+box_test_ascii_matches_original_border :: proc(t: ^testing.T) {
+	box, err := grid_init(5, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&box)
+	original, original_err := grid_init(5, 4)
+	testing.expect(t, original_err == .None)
+	defer grid_destroy(&original)
+	style := Style{fg = rgb(8, 9, 10)}
+	for clipped in 0..<2 {
+		if clipped == 1 {
+			testing.expect(t, push_clip(&box, {1, 1, 3, 2}))
+			testing.expect(t, push_clip(&original, {1, 1, 3, 2}))
+		}
+		for x in -1..<2 {
+			for y in -1..<2 {
+				for width in 1..<7 {
+					for height in 1..<6 {
+						fill(&box, 0, 0, 5, 4, BLANK_CELL)
+						fill(&original, 0, 0, 5, 4, BLANK_CELL)
+						bounds := Rect{x, y, width, height}
+						draw_box(&box, bounds, {border = BORDER_ASCII, border_style = style})
+						draw_border(&original, bounds, style)
+						for cell, i in box.cells {
+							testing.expect(t, cell == original.cells[i])
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@(test)
+box_test_unjoined_titles_and_narrow :: proc(t: ^testing.T) {
+	grid, err := grid_init(7, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	draw_box(&grid, {0, 0, 7, 3}, {
+		border = BORDER_DOUBLE, hidden_sides = {.Left, .Right, .Bottom},
+		title = "X\nY", title_align = .End,
+	})
+	box_test_cell(t, &grid, 3, 0, {'═', {}})
+	box_test_cell(t, &grid, 4, 0, {' ', {}})
+	box_test_cell(t, &grid, 5, 0, {'X', {}})
+	box_test_cell(t, &grid, 6, 0, {' ', {}})
+	draw_box(&grid, {0, 1, 3, 2}, {title = "too long"})
+	box_test_cell(t, &grid, 0, 1, {'┌', {}})
+	box_test_cell(t, &grid, 1, 1, {'t', {}})
+	box_test_cell(t, &grid, 2, 1, {'┐', {}})
+}
