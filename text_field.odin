@@ -282,19 +282,47 @@ Text_Field_Result :: struct {
 	cancelled: bool,
 }
 
+@(private)
+text_field_paste :: proc(field: ^Text_Field, text: string) {
+	if text_field_overlaps(field, text) {
+		return
+	}
+	bytes_left := len(field.buffer)-field.length
+	runes_left := max(int)
+	if field.max_runes > 0 {
+		runes_left = max(field.max_runes-utf8.rune_count(text_field_text(field)), 0)
+	}
+	cut := 0
+	for i := 0; i < len(text); {
+		r, n := utf8.decode_rune(text[i:])
+		if text_field_printable(r) && (r != utf8.RUNE_ERROR || n != 1) {
+			if n > bytes_left || runes_left == 0 {
+				break
+			}
+			bytes_left -= n
+			runes_left -= 1
+		}
+		i += n
+		cut = i
+	}
+	_ = text_field_insert_string(field, text[:cut])
+}
+
 // text_field_handle applies supported key bindings and paste events. Paste
-// chunks are atomic and independently decoded: invalid bytes, including bytes
-// of UTF-8 split between chunks, controls, and line/paragraph separators are
-// discarded. Paste boundaries are consumed. Unsupported events and modifier
-// combinations are unhandled; recognized events remain handled even if an
-// edit is blocked by capacity.
+// chunks insert the longest accepted rune prefix that fits the buffer and
+// max_runes. Chunks are independently decoded: invalid bytes, including bytes
+// of UTF-8 split between manually supplied chunks, controls, and line/paragraph
+// separators are discarded. input_parse does not split UTF-8 sequences at
+// input boundaries. The source must not overlap the field's buffer. Paste
+// boundaries are consumed. Unsupported events and modifier combinations are
+// unhandled; recognized events remain handled even if an edit is blocked.
 text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_Result {
 	paste, is_paste := event.(Paste_Event)
 	if is_paste {
 		result := Text_Field_Result{handled = true}
 		if paste.kind == .Chunk {
 			old_length := field.length
-			_ = text_field_insert_string(field, string(paste.text))
+			text_field_paste(field, string(paste.text))
 			result.changed = field.length != old_length
 		}
 		return result

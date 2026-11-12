@@ -146,9 +146,41 @@ text_field_test_paste :: proc(t: ^testing.T) {
 	testing.expect(t, result.changed && text_field_text(&field) == "aé🙂X")
 	chunk = transmute([]byte)string("12345")
 	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
-	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "aé🙂X")
+	testing.expect(t, result.handled && result.changed && text_field_text(&field) == "aé🙂X1234")
 	result = text_field_handle(&field, Paste_Event{kind = .End})
 	testing.expect(t, result.handled && !result.changed)
+}
+
+@(test)
+text_field_test_paste_fitting_prefix :: proc(t: ^testing.T) {
+	buffer: [8]byte
+	field := text_field_init(buffer[:], "ab")
+	text_field_left(&field)
+	chunk := transmute([]byte)string("\n\xffé🙂X")
+	result := text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.handled && result.changed)
+	testing.expect(t, text_field_text(&field) == "aé🙂b" && field.cursor == 7)
+	result = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("X")})
+	testing.expect(t, result.handled && !result.changed)
+
+	field = text_field_init(buffer[:], "ab")
+	field.max_runes = 4
+	text_field_home(&field)
+	chunk = transmute([]byte)string("\t界\xfféX")
+	result = text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.changed && text_field_text(&field) == "界éab" && field.cursor == 5)
+	testing.expect(t, !text_field_insert_string(&field, "X"))
+	field.max_runes = 1
+	result = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("X")})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "界éab")
+
+	field = text_field_init(buffer[:4], "ab")
+	chunk = transmute([]byte)string("界x")
+	result = text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "ab")
+	chunk = field.buffer[:field.length]
+	result = text_field_handle(&field, Paste_Event{.Chunk, chunk})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "ab")
 }
 
 @(private)
@@ -258,6 +290,7 @@ text_field_test_no_allocation :: proc(t: ^testing.T) {
 		defer context.allocator = previous
 		field := text_field_init(buffer[:], "é word")
 		_ = text_field_handle(&field, Key_Event{.Rune, 'w', {.Ctrl}})
+		field.max_runes = 3
 		_ = text_field_handle(&field, Paste_Event{.Chunk, transmute([]byte)string("界🙂")})
 		_ = text_field_insert_rune(&field, 'z')
 		text_field_word_left(&field)
