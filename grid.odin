@@ -298,14 +298,24 @@ draw_text :: proc(grid: ^Grid, x, y: int, text: string, style: Style = {}) {
 		return
 	}
 	column := x
+	start, end := clip.x+clip.width, clip.x
+	offset := y * grid.width
 	for glyph in text {
 		if column >= clip.x+clip.width {
 			break
 		}
 		if column >= clip.x {
-			set_cell(grid, column, y, {glyph, style})
+			cell := Cell{glyph, style}
+			if grid.cells[offset+column] != cell {
+				grid.cells[offset+column] = cell
+				start = min(start, column)
+				end = column+1
+			}
 		}
 		column += 1
+	}
+	if start < end {
+		grid_mark_dirty(grid, y, start, end)
 	}
 }
 

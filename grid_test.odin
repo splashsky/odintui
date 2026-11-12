@@ -176,6 +176,13 @@ test_grid_nested_clips_and_resize :: proc(t: ^testing.T) {
 	testing.expect(t, cell.glyph == '-')
 	cell, _ = get_cell(&grid, 4, 2)
 	testing.expect(t, cell == BLANK_CELL)
+	draw_progress_bar(&grid, Rect{0, 0, 5, 3}, 0.6, {}, {})
+	cell, _ = get_cell(&grid, 2, 1)
+	testing.expect(t, cell.glyph == '#')
+	cell, _ = get_cell(&grid, 3, 1)
+	testing.expect(t, cell.glyph == '-')
+	cell, _ = get_cell(&grid, 0, 1)
+	testing.expect(t, cell == BLANK_CELL)
 	pop_clip(&grid)
 
 	testing.expect(t, grid_resize(&grid, 3, 3) == .None)
@@ -187,6 +194,14 @@ test_grid_nested_clips_and_resize :: proc(t: ^testing.T) {
 	testing.expect(t, push_clip(&grid, Rect{min(int), 0, max(int), 1}))
 	testing.expect(t, rect_is_empty(current_clip(&grid)))
 	testing.expect(t, !set_cell(&grid, 0, 0, {'!', {}}))
+	pop_clip(&grid)
+	testing.expect(t, push_clip(&grid, Rect{9, 0, 2, 1}))
+	testing.expect(t, push_clip(&grid, Rect{10, 0, 2, 1}))
+	testing.expect(t, rect_is_empty(current_clip(&grid)))
+	testing.expect(t, grid_resize(&grid, 12, 3) == .None)
+	testing.expect(t, current_clip(&grid) == Rect{10, 0, 1, 1})
+	pop_clip(&grid)
+	testing.expect(t, current_clip(&grid) == Rect{9, 0, 2, 1})
 	grid_destroy(&grid)
 	testing.expect(t, grid.clip_depth == 0)
 }
@@ -330,4 +345,31 @@ test_grid_hex_colors :: proc(t: ^testing.T) {
 		color, ok := hex(input)
 		testing.expect(t, !ok && color == Color{})
 	}
+}
+
+@(test)
+test_grid_clipped_text_dirty_ranges :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+	set_cell(&grid, 1, 0, {'b', {}})
+	set_cell(&grid, 3, 0, {'d', {}})
+	testing.expect(t, render(&grid, backend))
+	count := mock.count
+	testing.expect(t, push_clip(&grid, Rect{1, 0, 4, 1}))
+	draw_text(&grid, 0, 0, "abcde")
+	testing.expect(t, grid.dirty[0] == Dirty_Row{2, 5})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+2)
+	testing.expect(t, mock.calls[count] == Call{2, 0, 1})
+	testing.expect(t, mock.calls[count+1] == Call{4, 0, 1})
+	draw_text(&grid, 0, 0, "abcde")
+	draw_text(&grid, min(int), 0, "abc")
+	draw_text(&grid, max(int), 0, "abc")
+	testing.expect(t, grid.dirty_start == grid.dirty_end)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+2)
 }
