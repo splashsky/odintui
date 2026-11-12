@@ -133,6 +133,34 @@ test_render_retry_after_partial_draw_and_changes :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_render_retry_after_missing_callback :: proc(t: ^testing.T) {
+	grid, err := grid_init(3, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+
+	set_cell(&grid, 1, 1, {'x', {}})
+	testing.expect(t, !render(&grid, Backend{user_data = &mock, flush = mock_flush}))
+	testing.expect(t, mock.count == 2 && mock.flushes == 1)
+	set_cell(&grid, 1, 1, BLANK_CELL)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == 4 && mock.flushes == 2)
+	testing.expect(t, mock.calls[2] == Call{0, 0, 3})
+	testing.expect(t, mock.calls[3] == Call{0, 1, 3})
+
+	set_cell(&grid, 1, 0, {'y', {}})
+	testing.expect(t, !render(&grid, Backend{user_data = &mock, draw_run = mock_draw}))
+	testing.expect(t, mock.count == 4 && mock.flushes == 2)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == 6 && mock.flushes == 3)
+	testing.expect(t, mock.calls[4] == Call{0, 0, 3})
+	testing.expect(t, mock.calls[5] == Call{0, 1, 3})
+	testing.expect(t, mock.screen[0][1].glyph == 'y')
+}
+
+@(test)
 test_render_retry_after_flush_failure :: proc(t: ^testing.T) {
 	grid, err := grid_init(2, 1)
 	testing.expect(t, err == .None)

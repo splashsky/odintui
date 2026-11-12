@@ -50,6 +50,7 @@ render :: proc(grid: ^Grid, backend: Backend) -> bool {
 			}
 			changed = true
 			if backend.draw_run == nil || backend.flush == nil {
+				invalidate(grid)
 				return false
 			}
 			offset := y * grid.width
