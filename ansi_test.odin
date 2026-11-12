@@ -1,5 +1,6 @@
 package odintui
 
+import "base:runtime"
 import "core:io"
 import "core:testing"
 
@@ -70,4 +71,74 @@ ansi_test_failure_resynchronizes :: proc(t: ^testing.T) {
 	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
 	testing.expect(t, backend.flush(backend.user_data))
 	testing.expect_value(t, ansi_test_text(&writer), "\x18\x1b[1;1H\x1b[0;1ma\x1b[0m")
+}
+
+@(test)
+ansi_test_colors_and_attributes :: proc(t: ^testing.T) {
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	all := bit_set[Attribute; u8]{
+		.Bold, .Dim, .Italic, .Underline, .Blink, .Reverse, .Hidden, .Strikethrough,
+	}
+	cells := []Cell{{'a', {rgb(255, 0, 0), rgb(128, 128, 128), all}}}
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(
+		t, ansi_test_text(&writer),
+		"\x1b[1;1H\x1b[0;1;2;3;4;5;7;8;9;38;2;255;0;0;48;2;128;128;128ma\x1b[0m",
+	)
+	writer.len = 0
+	state.color_mode = .Color_256
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(
+		t, ansi_test_text(&writer),
+		"\x1b[1;1H\x1b[0;1;2;3;4;5;7;8;9;38;5;196;48;5;244ma\x1b[0m",
+	)
+	writer.len = 0
+	state.color_mode = .Color_16
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(
+		t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0;1;2;3;4;5;7;8;9;91;100ma\x1b[0m",
+	)
+}
+
+@(test)
+ansi_test_sanitizes_cells_and_replacement :: proc(t: ^testing.T) {
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, replacement = '·'}
+	backend := ansi_backend(&state)
+	cells := []Cell{
+		{'A', {}}, {'é', {}}, {'\x1b', {}}, {rune(0x7f), {}}, {rune(0x9b), {}},
+		{'界', {}}, {rune(0xd800), {}}, {rune(0x110000), {}}, {rune(-1), {}},
+		{'\u0301', {}}, {'\u200d', {}}, {'\u1161', {}},
+	}
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0mAé··········\x1b[0m")
+	writer.len = 0
+	state.replacement = '\x1b'
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells[2:3]))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H?\x1b[0m")
+}
+
+@(test)
+ansi_test_render_does_not_allocate :: proc(t: ^testing.T) {
+	failing := Failing_Allocator{backing = context.allocator, remaining = 3}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &failing}
+	grid, err := grid_init(70, 70, allocator)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, color_mode = .Color_256}
+	backend := ansi_backend(&state)
+	fill(&grid, 0, 0, 70, 70, {'界', {fg = rgb(100, 100, 100)}})
+	context.allocator = allocator
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, writer.writes > 1)
+	set_cell(&grid, 0, 0, {'é', {}})
+	testing.expect(t, render(&grid, backend))
 }
