@@ -3,7 +3,24 @@ package main
 import tui "../.."
 import "base:runtime"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
+
+@(test)
+test_raw_attributes :: proc(t: ^testing.T) {
+	saved := posix.termios{
+		c_iflag = {.IXON, .ICRNL},
+		c_oflag = {.OPOST},
+		c_cflag = {.PARENB},
+		c_lflag = {.ICANON, .ECHO, .ISIG, .IEXTEN},
+	}
+	raw := terminal_raw_attributes(saved)
+	control := transmute(posix.tcflag_t)raw.c_cflag
+	testing.expect(t, control & posix.tcflag_t(posix._CSIZE) == posix.tcflag_t(posix.CS8))
+	testing.expect(t, .PARENB not_in raw.c_cflag)
+	testing.expect(t, raw.c_iflag == {} && raw.c_oflag == {} && raw.c_lflag == {})
+	testing.expect(t, raw.c_cc[.VMIN] == 1 && raw.c_cc[.VTIME] == 0)
+}
 
 @(test)
 test_focus_form_and_password_log :: proc(t: ^testing.T) {

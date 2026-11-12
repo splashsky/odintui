@@ -42,6 +42,22 @@ terminal_set_attributes :: proc(attributes: ^posix.termios) -> bool {
 	return true
 }
 
+terminal_raw_attributes :: proc(saved: posix.termios) -> posix.termios {
+	raw := saved
+	raw.c_iflag -= {
+		.IGNBRK, .BRKINT, .ICRNL, .INLCR, .IGNCR, .INPCK, .ISTRIP,
+		.IXON, .IXOFF, .IXANY, .PARMRK,
+	}
+	raw.c_oflag -= {.OPOST}
+	raw.c_cflag -= posix.CSIZE + {.PARENB}
+	// CS8 is a multi-bit field, not a single flag.
+	raw.c_cflag += transmute(posix.CControl_Flags)posix.tcflag_t(posix.CS8)
+	raw.c_lflag -= {.ECHO, .ECHONL, .ICANON, .ISIG, .IEXTEN}
+	raw.c_cc[.VMIN] = 1
+	raw.c_cc[.VTIME] = 0
+	return raw
+}
+
 terminal_open :: proc(term: ^Terminal) -> bool {
 	if !posix.isatty(posix.STDIN_FILENO) || !posix.isatty(posix.STDOUT_FILENO) {
 		return false
@@ -59,17 +75,7 @@ terminal_open :: proc(term: ^Terminal) -> bool {
 	if posix.tcgetattr(posix.STDIN_FILENO, &term.saved) != .OK {
 		return false
 	}
-	raw := term.saved
-	raw.c_iflag -= {
-		.IGNBRK, .BRKINT, .ICRNL, .INLCR, .IGNCR, .INPCK, .ISTRIP,
-		.IXON, .IXOFF, .IXANY, .PARMRK,
-	}
-	raw.c_oflag -= {.OPOST}
-	raw.c_cflag -= posix.CSIZE + {.PARENB}
-	raw.c_cflag += {.CS8}
-	raw.c_lflag -= {.ECHO, .ECHONL, .ICANON, .ISIG, .IEXTEN}
-	raw.c_cc[.VMIN] = 1
-	raw.c_cc[.VTIME] = 0
+	raw := terminal_raw_attributes(term.saved)
 	if !terminal_set_attributes(&raw) {
 		return false
 	}
