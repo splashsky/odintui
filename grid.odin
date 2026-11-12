@@ -215,21 +215,26 @@ set_cell :: proc(grid: ^Grid, x, y: int, cell: Cell) -> bool {
 	index := y*grid.width + x
 	if grid.cells[index] != cell {
 		grid.cells[index] = cell
-		row := &grid.dirty[y]
-		if row.start == row.end {
-			row.start, row.end = x, x+1
-		} else {
-			row.start = min(row.start, x)
-			row.end = max(row.end, x+1)
-		}
-		if grid.dirty_start == grid.dirty_end {
-			grid.dirty_start, grid.dirty_end = y, y+1
-		} else {
-			grid.dirty_start = min(grid.dirty_start, y)
-			grid.dirty_end = max(grid.dirty_end, y+1)
-		}
+		grid_mark_dirty(grid, y, x, x+1)
 	}
 	return true
+}
+
+@(private)
+grid_mark_dirty :: proc(grid: ^Grid, y, start, end: int) {
+	row := &grid.dirty[y]
+	if row.start == row.end {
+		row.start, row.end = start, end
+	} else {
+		row.start = min(row.start, start)
+		row.end = max(row.end, end)
+	}
+	if grid.dirty_start == grid.dirty_end {
+		grid.dirty_start, grid.dirty_end = y, y+1
+	} else {
+		grid.dirty_start = min(grid.dirty_start, y)
+		grid.dirty_end = max(grid.dirty_end, y+1)
+	}
 }
 
 // draw_text draws one decoded rune per cell on one row, including controls.
@@ -252,31 +257,27 @@ draw_text :: proc(grid: ^Grid, x, y: int, text: string, style: Style = {}) {
 	}
 }
 
-// fill clips a rectangle to the grid. Non-positive dimensions do nothing.
+// fill clips a rectangle to the current clip and grid. Non-positive sizes do nothing.
 fill :: proc(grid: ^Grid, x, y, width, height: int, cell: Cell) {
-	if len(grid.cells) == 0 || width <= 0 || height <= 0 || x >= grid.width || y >= grid.height {
+	if len(grid.cells) == 0 {
 		return
 	}
-	x, y, width, height := x, y, width, height
-	if x < 0 {
-		if x <= -width {
-			return
-		}
-		width += x
-		x = 0
+	area := rect_intersect(Rect{x, y, width, height}, current_clip(grid))
+	if rect_is_empty(area) {
+		return
 	}
-	if y < 0 {
-		if y <= -height {
-			return
+	for row_y in area.y..<area.y+area.height {
+		start, end := area.x+area.width, area.x
+		offset := row_y * grid.width
+		for column_x in area.x..<area.x+area.width {
+			if grid.cells[offset+column_x] != cell {
+				grid.cells[offset+column_x] = cell
+				start = min(start, column_x)
+				end = column_x+1
+			}
 		}
-		height += y
-		y = 0
-	}
-	width = min(width, grid.width-x)
-	height = min(height, grid.height-y)
-	for row in y..<y+height {
-		for column in x..<x+width {
-			set_cell(grid, column, row, cell)
+		if start < end {
+			grid_mark_dirty(grid, row_y, start, end)
 		}
 	}
 }

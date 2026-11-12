@@ -245,3 +245,42 @@ test_grid_clipped_drawing_does_not_allocate :: proc(t: ^testing.T) {
 	cell, _ = get_cell(&grid, 0, 1)
 	testing.expect(t, cell == BLANK_CELL)
 }
+
+@(test)
+test_grid_fill_dirty_ranges_and_render :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	testing.expect(t, render(&grid, backend))
+	set_cell(&grid, 2, 1, {'x', {}})
+	set_cell(&grid, 4, 1, {'x', {}})
+	testing.expect(t, render(&grid, backend))
+	count := mock.count
+
+	testing.expect(t, push_clip(&grid, Rect{1, 1, 4, 2}))
+	fill(&grid, -1, 0, max(int), 3, {'x', {}})
+	testing.expect(t, grid.dirty_start == 1 && grid.dirty_end == 3)
+	testing.expect(t, grid.dirty[0] == Dirty_Row{})
+	testing.expect(t, grid.dirty[1] == Dirty_Row{1, 4})
+	testing.expect(t, grid.dirty[2] == Dirty_Row{1, 5})
+	testing.expect(t, grid.dirty[3] == Dirty_Row{})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+3)
+	testing.expect(t, mock.calls[count] == Call{1, 1, 1})
+	testing.expect(t, mock.calls[count+1] == Call{3, 1, 1})
+	testing.expect(t, mock.calls[count+2] == Call{1, 2, 4})
+	fill(&grid, 0, 0, 6, 4, {'x', {}})
+	testing.expect(t, grid.dirty_start == grid.dirty_end)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+3)
+
+	set_cell(&grid, 1, 1, {'!', {}})
+	fill(&grid, 2, 1, 1, 1, {'y', {}})
+	testing.expect(t, grid.dirty[1] == Dirty_Row{1, 3})
+	fill(&grid, 1, 1, 1, 1, {'x', {}})
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.calls[count+3] == Call{2, 1, 1})
+	pop_clip(&grid)
+}
