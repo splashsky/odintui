@@ -235,6 +235,10 @@ text_field_test_placeholder_and_mask :: proc(t: ^testing.T) {
 	options.mask = '\n'
 	options.focused = false
 	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
+	text_field_test_cell(t, &grid, 0, 0, {'*', style})
+	text_field_test_cell(t, &grid, 1, 0, {'*', style})
+	options.mask = 0
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, options)
 	text_field_test_cell(t, &grid, 0, 0, {'A', style})
 	text_field_test_cell(t, &grid, 1, 0, {'🙂', style})
 }

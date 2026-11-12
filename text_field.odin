@@ -432,7 +432,7 @@ text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_
 }
 
 // Text_Field_Options configures the field, placeholder, mask and cursor.
-// A zero or non-printable mask disables masking.
+// A zero mask disables masking; a non-printable mask uses '*' instead.
 Text_Field_Options :: struct {
 	style:             Style,
 	placeholder:       string,
@@ -466,7 +466,10 @@ draw_text_field :: proc(
 	if placeholder {
 		text, style = options.placeholder, options.placeholder_style
 	}
-	mask := !placeholder && text_field_printable(options.mask)
+	mask := options.mask
+	if mask != 0 && !text_field_printable(mask) {
+		mask = '*'
+	}
 	index, byte_index := 0, 0
 	for byte_index < len(text) {
 		r, n := utf8.decode_rune(text[byte_index:])
@@ -481,8 +484,8 @@ draw_text_field :: proc(
 			}
 			x := i128(bounds.x)+i128(column)
 			if x >= i128(min(int)) && x <= i128(max(int)) {
-				if mask {
-					r = options.mask
+				if !placeholder && mask != 0 {
+					r = mask
 				}
 				set_cell(grid, int(x), bounds.y, {r, style})
 			}
