@@ -251,6 +251,8 @@ text_field_test_no_allocation :: proc(t: ^testing.T) {
 	testing.expect(t, err == .None)
 	defer grid_destroy(&grid)
 	buffer: [32]byte
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
 	good := false
 	{
 		previous := context.allocator
@@ -270,9 +272,33 @@ text_field_test_no_allocation :: proc(t: ^testing.T) {
 		pop_clip(&grid)
 		text_field_clear(&field)
 		_, _, _ = draw_text_field(&grid, Rect{0, 0, 5, 1}, &field, {placeholder = "hint"})
-		good = visible && state.remaining == 0
+		ok := render(&grid, backend)
+		good = visible && ok && mock.screen[0][0].glyph == 'h' && state.remaining == 0
 	}
 	testing.expect(t, good)
+}
+
+@(test)
+text_field_test_render_diffs :: proc(t: ^testing.T) {
+	grid, err := grid_init(4, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [8]byte
+	field := text_field_init(buffer[:], "ab")
+	mock: Mock_Backend
+	backend := mock_backend(&mock)
+	options := Text_Field_Options{focused = true}
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 4, 1}, &field, options)
+	testing.expect(t, render(&grid, backend))
+	count := mock.count
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 4, 1}, &field, options)
+	testing.expect(t, render(&grid, backend) && mock.count == count)
+	text_field_left(&field)
+	_, _, _ = draw_text_field(&grid, Rect{0, 0, 4, 1}, &field, options)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, mock.count == count+1 && mock.calls[count] == Call{1, 0, 2})
+	testing.expect(t, .Reverse in mock.screen[0][1].style.attributes)
+	testing.expect(t, .Reverse not_in mock.screen[0][2].style.attributes)
 }
 
 @(test)
