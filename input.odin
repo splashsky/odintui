@@ -1,7 +1,7 @@
 package odintui
 
 // Key identifies a decoded terminal key. Unknown reports a skipped,
-// unsupported escape sequence (or an invalid escape prefix).
+// unsupported CSI/SS3 sequence (or an invalid CSI/SS3 prefix).
 Key :: enum {
 	Rune,
 	Enter,
@@ -115,8 +115,8 @@ Input_Parser :: struct {
 // bytes and append new input before retrying when consumed is zero. Set final
 // after an escape timeout or at EOF to resolve incomplete input; nonempty
 // input then always makes progress. Empty input always consumes zero bytes.
-// Ambiguous Alt prefixes may also need the timeout. Unsupported complete
-// escapes are reported as Key_Event{key = .Unknown}.
+// Alt+[ and Alt+O are ambiguous prefixes and also need the timeout.
+// Unsupported complete CSI/SS3 escapes are Key_Event{key = .Unknown}.
 // Paste chunks borrow data until the caller changes or releases that buffer.
 // During a paste, use final only at EOF: a partial end marker is then text.
 input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Input_Event, int) {
@@ -133,16 +133,8 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 			}
 			return Key_Event{key = .Escape}, 1
 		}
-		if data[1] == '[' || data[1] == 'O' ||
-		   data[1] == ']' || data[1] == 'P' || data[1] == 'X' ||
-		   data[1] == '^' || data[1] == '_' || (data[1] >= 0x20 && data[1] <= 0x2f) {
-			event: Input_Event
-			consumed: int
-			if data[1] == '[' || data[1] == 'O' {
-				event, consumed = input_sequence(parser, data)
-			} else {
-				event, consumed = input_other_escape(data)
-			}
+		if data[1] == '[' || data[1] == 'O' {
+			event, consumed := input_sequence(parser, data)
 			if consumed > 0 {
 				return event, consumed
 			}
@@ -162,30 +154,6 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 		return nil, 0
 	}
 	return event, consumed
-}
-
-@(private)
-input_other_escape :: proc(data: []byte) -> (Input_Event, int) {
-	if data[1] >= 0x20 && data[1] <= 0x2f {
-		for i := 2; i < len(data); i += 1 {
-			if data[i] >= 0x30 && data[i] <= 0x7e {
-				return Key_Event{key = .Unknown}, i+1
-			}
-			if data[i] < 0x20 || data[i] > 0x2f {
-				return Key_Event{key = .Unknown}, i
-			}
-		}
-	} else {
-		for i := 2; i < len(data); i += 1 {
-			if data[1] == ']' && data[i] == 7 {
-				return Key_Event{key = .Unknown}, i+1
-			}
-			if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '\\' {
-				return Key_Event{key = .Unknown}, i+2
-			}
-		}
-	}
-	return nil, 0
 }
 
 // input_next advances pending past one decoded event. It can be used as an

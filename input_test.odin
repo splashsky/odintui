@@ -24,6 +24,10 @@ input_test_text_and_controls :: proc(t: ^testing.T) {
 		{"\r", {key = .Enter}, 1},
 		{"\n", {key = .Enter}, 1},
 		{"\x1bx", {.Rune, 'x', {.Alt}}, 2},
+		{"\x1bPnext", {.Rune, 'P', {.Alt}}, 2},
+		{"\x1b]next", {.Rune, ']', {.Alt}}, 2},
+		{"\x1b next", {.Rune, ' ', {.Alt}}, 2},
+		{"\x1b!next", {.Rune, '!', {.Alt}}, 2},
 		{"\x1b\x01", {.Rune, 'a', {.Alt, .Ctrl}}, 2},
 		{"\x1bé", {.Rune, 'é', {.Alt}}, 3},
 		{"\xff", {.Rune, '\uFFFD', {}}, 1},
@@ -129,32 +133,11 @@ input_test_escape_keys :: proc(t: ^testing.T) {
 }
 
 @(test)
-input_test_unknown_escape_strings :: proc(t: ^testing.T) {
+input_test_unknown_escape_progress :: proc(t: ^testing.T) {
 	parser: Input_Parser
-	cases := []string{
-		"\x1b]0;title\x07",
-		"\x1b]0;title\x1b\\",
-		"\x1bP1;2|payload\x1b\\",
-		"\x1b(0",
-		"\x1b#8",
-	}
-	for text in cases {
-		data := transmute([]byte)text
-		for i in 1..<len(data) {
-			_, consumed := input_parse(&parser, data[:i])
-			testing.expect(t, consumed == 0)
-		}
-		event, consumed := input_parse(&parser, data)
-		key, ok := event.(Key_Event)
-		testing.expect(t, ok && key.key == .Unknown && consumed == len(data))
-	}
-	data := transmute([]byte)string("\x1b]unfinished")
-	event, consumed := input_parse(&parser, data, true)
+	data := transmute([]byte)string("\x1b[\x1bx")
+	event, consumed := input_parse(&parser, data)
 	key, ok := event.(Key_Event)
-	testing.expect(t, ok && key == Key_Event{.Rune, ']', {.Alt}} && consumed == 2)
-	data = transmute([]byte)string("\x1b[\x1bx")
-	event, consumed = input_parse(&parser, data)
-	key, ok = event.(Key_Event)
 	testing.expect(t, ok && key.key == .Unknown && consumed == 2)
 	event, consumed = input_parse(&parser, data[consumed:])
 	key, ok = event.(Key_Event)
