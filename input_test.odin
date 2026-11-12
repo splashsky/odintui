@@ -178,3 +178,60 @@ input_test_mouse :: proc(t: ^testing.T) {
 		testing.expect(t, ok && key.key == .Unknown && consumed == len(text))
 	}
 }
+
+@(test)
+input_test_focus_and_paste :: proc(t: ^testing.T) {
+	parser: Input_Parser
+	cases := []string{"\x1b[I", "\x1b[O"}
+	for text in cases {
+		event, consumed := input_parse(&parser, transmute([]byte)text)
+		focus, ok := event.(Focus_Event)
+		testing.expect(t, ok && focus.focused == (text == "\x1b[I") && consumed == len(text))
+	}
+	data := transmute([]byte)string("\x1b[200~ab\x1b[A\x00\x1b[201~z")
+	event, consumed := input_parse(&parser, data)
+	start, ok := event.(Paste_Event)
+	testing.expect(t, ok && start.kind == .Start && consumed == 6)
+	data = data[consumed:]
+	event, consumed = input_parse(&parser, data)
+	chunk, chunk_ok := event.(Paste_Event)
+	testing.expect(t, chunk_ok && chunk.kind == .Chunk && string(chunk.text) == "ab\x1b[A\x00")
+	testing.expect(t, &chunk.text[0] == &data[0] && consumed == len(chunk.text))
+	data = data[consumed:]
+	event, consumed = input_parse(&parser, data)
+	end, end_ok := event.(Paste_Event)
+	testing.expect(t, end_ok && end.kind == .End && consumed == 6)
+	data = data[consumed:]
+	event, consumed = input_parse(&parser, data)
+	key, key_ok := event.(Key_Event)
+	testing.expect(t, key_ok && key.rune == 'z' && consumed == 1)
+}
+
+@(test)
+input_test_paste_split_marker :: proc(t: ^testing.T) {
+	parser: Input_Parser
+	_, _ = input_parse(&parser, transmute([]byte)string("\x1b[200~"))
+	marker := transmute([]byte)string("\x1b[201~")
+	for i in 1..<len(marker) {
+		_, consumed := input_parse(&parser, marker[:i])
+		testing.expect(t, consumed == 0)
+	}
+	data := transmute([]byte)string("abc\x1b[20")
+	event, consumed := input_parse(&parser, data)
+	chunk, ok := event.(Paste_Event)
+	testing.expect(t, ok && chunk.kind == .Chunk && string(chunk.text) == "abc" && consumed == 3)
+	_, consumed = input_parse(&parser, data[3:])
+	testing.expect(t, consumed == 0)
+	event, consumed = input_parse(&parser, data[3:], true)
+	chunk, ok = event.(Paste_Event)
+	testing.expect(t, ok && chunk.kind == .Chunk && string(chunk.text) == "\x1b[20" && consumed == 4)
+	event, consumed = input_parse(&parser, marker)
+	end, end_ok := event.(Paste_Event)
+	testing.expect(t, end_ok && end.kind == .End && consumed == len(marker))
+
+	// A mismatched partial marker is paste text, not an escape sequence.
+	_, _ = input_parse(&parser, transmute([]byte)string("\x1b[200~"))
+	event, consumed = input_parse(&parser, transmute([]byte)string("\x1b[20X"))
+	chunk, ok = event.(Paste_Event)
+	testing.expect(t, ok && chunk.kind == .Chunk && string(chunk.text) == "\x1b[20X" && consumed == 5)
+}

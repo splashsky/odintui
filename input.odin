@@ -78,23 +78,50 @@ Mouse_Event :: struct {
 	modifiers: Modifiers,
 }
 
+// Paste_Kind marks the beginning, borrowed bytes, and end of a paste.
+Paste_Kind :: enum {
+	Start,
+	Chunk,
+	End,
+}
+
+// Paste_Event carries a paste boundary or a chunk borrowed from the input.
+Paste_Event :: struct {
+	kind: Paste_Kind,
+	text: []byte,
+}
+
+// Focus_Event reports whether the terminal gained or lost focus.
+Focus_Event :: struct {
+	focused: bool,
+}
+
 // Input_Event is a decoded terminal input event.
 Input_Event :: union {
 	Key_Event,
 	Mouse_Event,
+	Paste_Event,
+	Focus_Event,
 }
 
-// Input_Parser retains streaming state; its zero value is ready to use.
-Input_Parser :: struct {}
+// Input_Parser retains streaming state; its zero value is ready to use. Do not
+// modify its fields while parsing a stream.
+Input_Parser :: struct {
+	in_paste: bool,
+}
 
 // input_parse decodes one event without allocation. Retain all unconsumed
 // bytes and append new input before retrying when consumed is zero. Set final
 // after an escape timeout or at EOF to resolve incomplete input; nonempty
 // input then always makes progress. Empty input always consumes zero bytes.
+// Paste chunks borrow data until the caller changes or releases that buffer.
+// During a paste, use final only at EOF: a partial end marker is then text.
 input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Input_Event, int) {
-	_ = parser
 	if len(data) == 0 {
 		return nil, 0
+	}
+	if parser.in_paste {
+		return input_paste(parser, data, final)
 	}
 	if data[0] == 0x1b {
 		if len(data) == 1 {
@@ -104,7 +131,7 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 			return Key_Event{key = .Escape}, 1
 		}
 		if data[1] == '[' || data[1] == 'O' {
-			event, consumed := input_sequence(data)
+			event, consumed := input_sequence(parser, data)
 			if consumed > 0 {
 				return event, consumed
 			}
@@ -127,7 +154,36 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 }
 
 @(private)
-input_sequence :: proc(data: []byte) -> (Input_Event, int) {
+input_paste :: proc(parser: ^Input_Parser, data: []byte, final: bool) -> (Input_Event, int) {
+	marker := "\x1b[201~"
+	for i := 0; i < len(data); i += 1 {
+		if data[i] != 0x1b {
+			continue
+		}
+		matched := 0
+		for matched < len(marker) && matched < len(data)-i &&
+		    data[i+matched] == marker[matched] {
+			matched += 1
+		}
+		if matched == len(marker) {
+			if i > 0 {
+				return Paste_Event{kind = .Chunk, text = data[:i]}, i
+			}
+			parser.in_paste = false
+			return Paste_Event{kind = .End}, len(marker)
+		}
+		if matched == len(data)-i && !final {
+			if i == 0 {
+				return nil, 0
+			}
+			return Paste_Event{kind = .Chunk, text = data[:i]}, i
+		}
+	}
+	return Paste_Event{kind = .Chunk, text = data}, len(data)
+}
+
+@(private)
+input_sequence :: proc(parser: ^Input_Parser, data: []byte) -> (Input_Event, int) {
 	if data[1] == '[' && len(data) > 2 && data[2] == '[' {
 		if len(data) == 3 {
 			return nil, 0
@@ -140,6 +196,14 @@ input_sequence :: proc(data: []byte) -> (Input_Event, int) {
 	for i := 2; i < len(data); i += 1 {
 		b := data[i]
 		if b >= 0x40 && b <= 0x7e {
+			if data[1] == '[' && i == 2 && (b == 'I' || b == 'O') {
+				return Focus_Event{focused = b == 'I'}, i+1
+			}
+			if data[1] == '[' && i == 5 && b == '~' &&
+			   data[2] == '2' && data[3] == '0' && data[4] == '0' {
+				parser.in_paste = true
+				return Paste_Event{kind = .Start}, i+1
+			}
 			if data[1] == '[' && i > 2 && data[2] == '<' {
 				return input_mouse(data[3:i], b), i+1
 			}
