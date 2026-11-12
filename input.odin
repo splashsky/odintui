@@ -121,6 +121,7 @@ Input_Parser :: struct {
 // Alt+[ and Alt+O are ambiguous prefixes and also need the timeout.
 // Unsupported complete CSI/SS3 escapes are Key_Event{key = .Unknown}.
 // Kitty's basic codepoint/modifier form is supported, not event types.
+// Caps/Num Lock modifier bits are ignored; Hyper and Meta are unsupported.
 // Other ESC-prefixed bytes are treated as Alt keys, not control strings.
 // Paste chunks borrow data until the caller changes or releases that buffer.
 // During a paste, use final only at EOF: a partial end marker is then text.
@@ -325,10 +326,13 @@ input_modifiers :: proc(value: int) -> (Modifiers, bool) {
 	if value == 0 {
 		value = 1
 	}
-	if value < 1 || value > 16 {
+	if value < 1 || value > 256 {
 		return {}, false
 	}
 	bits := value - 1
+	if bits & 0x30 != 0 {
+		return {}, false
+	}
 	mods: Modifiers
 	if bits & 1 != 0 {
 		mods += {.Shift}
