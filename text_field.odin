@@ -260,3 +260,83 @@ text_field_delete_to_end :: proc(field: ^Text_Field) -> bool {
 	field.length = field.cursor
 	return true
 }
+
+// Text_Field_Result describes a consumed event, its text change, or a request
+// to submit/cancel. Cursor movement is handled but not a text change.
+Text_Field_Result :: struct {
+	handled:   bool,
+	changed:   bool,
+	submitted: bool,
+	cancelled: bool,
+}
+
+// text_field_handle applies supported key bindings. Unsupported events and
+// modifier combinations are left unhandled for the host to route elsewhere.
+// Recognized keys remain handled even if an edit is blocked by capacity.
+text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_Result {
+	key, ok := event.(Key_Event)
+	if !ok {
+		return {}
+	}
+	result := Text_Field_Result{handled = true}
+	if key.modifiers == {.Ctrl} {
+		#partial switch key.key {
+		case .Left:
+			text_field_word_left(field)
+		case .Right:
+			text_field_word_right(field)
+		case .Rune:
+			switch key.rune {
+			case 'a': text_field_home(field)
+			case 'e': text_field_end(field)
+			case 'w': result.changed = text_field_delete_word_backward(field)
+			case 'u': result.changed = text_field_delete_to_start(field)
+			case 'k': result.changed = text_field_delete_to_end(field)
+			case 'd': result.changed = text_field_delete(field)
+			case: return {}
+			}
+		case:
+			return {}
+		}
+		return result
+	}
+	if key.modifiers == {.Alt} {
+		#partial switch key.key {
+		case .Backspace:
+			result.changed = text_field_delete_word_backward(field)
+		case .Rune:
+			switch key.rune {
+			case 'b': text_field_word_left(field)
+			case 'f': text_field_word_right(field)
+			case: return {}
+			}
+		case:
+			return {}
+		}
+		return result
+	}
+	if key.key == .Rune && (key.modifiers == {} || key.modifiers == {.Shift}) {
+		if !text_field_printable(key.rune) {
+			return {}
+		}
+		old_length := field.length
+		_ = text_field_insert_rune(field, key.rune)
+		result.changed = field.length != old_length
+		return result
+	}
+	if key.modifiers != {} {
+		return {}
+	}
+	#partial switch key.key {
+	case .Enter: result.submitted = true
+	case .Escape: result.cancelled = true
+	case .Backspace: result.changed = text_field_backspace(field)
+	case .Delete: result.changed = text_field_delete(field)
+	case .Left: text_field_left(field)
+	case .Right: text_field_right(field)
+	case .Home: text_field_home(field)
+	case .End: text_field_end(field)
+	case: return {}
+	}
+	return result
+}
