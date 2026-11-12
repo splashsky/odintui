@@ -361,7 +361,7 @@ ansi_single_column :: proc(glyph: rune) -> bool {
 	   (glyph >= 0x1160 && glyph <= 0x11ff) || (glyph >= 0xd7b0 && glyph <= 0xd7ff) {
 		return false
 	}
-	return unicode.is_printable(glyph) &&
+	return unicode.is_graphic(glyph) &&
 	       !unicode.is_combining(glyph) &&
 	       !unicode.is_nonspacing_mark(glyph) &&
 	       !unicode.is_spacing_mark(glyph) &&

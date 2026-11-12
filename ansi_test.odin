@@ -146,6 +146,17 @@ ansi_test_sanitizes_cells_and_replacement :: proc(t: ^testing.T) {
 }
 
 @(test)
+ansi_test_single_column_spaces :: proc(t: ^testing.T) {
+	writer: ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	cells := []Cell{{'\u00a0', {}}, {'\u2002', {}}, {'\u0301', {}}, {'\u093e', {}}}
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0m\u00a0\u2002??\x1b[0m")
+}
+
+@(test)
 ansi_test_render_does_not_allocate :: proc(t: ^testing.T) {
 	failing := Failing_Allocator{backing = context.allocator, remaining = 3}
 	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &failing}
