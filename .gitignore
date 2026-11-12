@@ -1,0 +1,8 @@
+# Odin build outputs
+/odintui
+/demo
+*.bin
+*.exe
+*.pdb
+*.o
+*.obj
