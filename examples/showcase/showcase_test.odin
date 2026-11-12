@@ -48,6 +48,25 @@ test_focus_form_and_password_log :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_log_formats_modifiers :: proc(t: ^testing.T) {
+	latest :: proc(log: ^Log_Panel_State) -> string {
+		index := (log.next+LOG_LINES-1)%LOG_LINES
+		return string(log.lines[index][:log.sizes[index]])
+	}
+	log: Log_Panel_State
+	log_event(&log, tui.Key_Event{key = .Right, modifiers = {.Shift, .Ctrl}}, false)
+	testing.expect_value(t, latest(&log), "Key Ctrl+Shift+Right")
+	log_event(&log, tui.Key_Event{key = .Rune, rune = 'x', modifiers = {.Alt}}, false)
+	testing.expect_value(t, latest(&log), "Key Alt+'x'")
+	log_event(&log, tui.Key_Event{key = .Enter}, false)
+	testing.expect_value(t, latest(&log), "Key Enter")
+	log_event(&log, tui.Mouse_Event{x = 5, y = 1, button = .Left, action = .Press}, false)
+	testing.expect_value(t, latest(&log), "Mouse Left Press 5,1")
+	log_event(&log, tui.Focus_Event{focused = false}, false)
+	testing.expect_value(t, latest(&log), "Focus lost")
+}
+
+@(test)
 test_scrolling_and_slider_mouse :: proc(t: ^testing.T) {
 	grid, err := tui.grid_init(100, 30)
 	testing.expect(t, err == .None)

@@ -271,7 +271,7 @@ controls_mouse :: proc(state: ^Controls_Panel_State, mouse: tui.Mouse_Event) {
 	}
 }
 
-LOG_LINES :: 8
+LOG_LINES :: 32
 Log_Panel_State :: struct {
 	lines: [LOG_LINES][128]byte,
 	sizes: [LOG_LINES]int,
@@ -279,24 +279,41 @@ Log_Panel_State :: struct {
 	count: int,
 }
 
+// Writes modifiers as a "Ctrl+Alt+Shift+Super+" prefix.
+modifier_prefix :: proc(buffer: []byte, modifiers: tui.Modifiers) -> string {
+	ORDER :: [4]tui.Modifier{.Ctrl, .Alt, .Shift, .Super}
+	NAMES :: [tui.Modifier]string{.Shift = "Shift+", .Alt = "Alt+", .Ctrl = "Ctrl+", .Super = "Super+"}
+	names := NAMES
+	n := 0
+	for modifier in ORDER {
+		if modifier in modifiers {
+			n += copy(buffer[n:], names[modifier])
+		}
+	}
+	return string(buffer[:n])
+}
+
 log_event :: proc(state: ^Log_Panel_State, event: tui.Input_Event, secret: bool) {
 	buffer := state.lines[state.next][:]
+	prefix_buffer: [32]byte
 	text := ""
 	switch value in event {
 	case tui.Key_Event:
+		prefix := modifier_prefix(prefix_buffer[:], value.modifiers)
 		if secret && value.key == .Rune {
-			text = fmt.bprintf(buffer, "Key Rune (hidden)")
+			text = fmt.bprintf(buffer, "Key %s(hidden)", prefix)
 		} else if value.key == .Rune {
-			text = fmt.bprintf(buffer, "Key %v %q %v", value.key, value.rune, value.modifiers)
+			text = fmt.bprintf(buffer, "Key %s%q", prefix, value.rune)
 		} else {
-			text = fmt.bprintf(buffer, "Key %v %v", value.key, value.modifiers)
+			text = fmt.bprintf(buffer, "Key %s%v", prefix, value.key)
 		}
 	case tui.Mouse_Event:
-		text = fmt.bprintf(buffer, "Mouse %v %v %d,%d", value.button, value.action, value.x, value.y)
+		prefix := modifier_prefix(prefix_buffer[:], value.modifiers)
+		text = fmt.bprintf(buffer, "Mouse %s%v %v %d,%d", prefix, value.button, value.action, value.x, value.y)
 	case tui.Paste_Event:
 		text = fmt.bprintf(buffer, "Paste %v (%d bytes)", value.kind, len(value.text))
 	case tui.Focus_Event:
-		text = fmt.bprintf(buffer, "Focus %v", value.focused)
+		text = fmt.bprintf(buffer, "Focus %s", "gained" if value.focused else "lost")
 	case nil:
 		text = fmt.bprintf(buffer, "Unknown event")
 	}
