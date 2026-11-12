@@ -171,14 +171,22 @@ list_index_at :: proc(
 	return view.index+row, true
 }
 
+@(private)
+list_scroll_to :: proc(state: ^List_State, count, viewport, offset: int) {
+	state.offset = scroll_clamp(offset, count, viewport)
+	if viewport > 0 && count > 0 {
+		state.selected = clamp(state.selected, state.offset, min(count-1, state.offset+viewport-1))
+	}
+}
+
 // List_Result reports whether an event was handled, changed state, or submitted.
 List_Result :: struct {
 	handled, changed, submitted: bool,
 }
 
 // list_handle processes navigation, Enter, and mouse input inside bounds.
-// Wheel presses scroll one item while keeping the selection visible. Scrollbar
-// presses and drags move the selection only if necessary to keep it visible.
+// Wheel presses scroll one item; scrollbar presses and drags jump. Scrolling
+// moves the selection only as far as needed to keep it within the viewport.
 list_handle :: proc(
 	state: ^List_State,
 	count: int,
@@ -215,26 +223,18 @@ list_handle :: proc(
 		copy := state^
 		view := list_begin(&copy, total, bounds, options)
 		if e.action == .Press && (e.button == .Wheel_Up || e.button == .Wheel_Down) {
-			if view.viewport > 0 && total > 0 {
-				offset := copy.offset
-				if e.button == .Wheel_Up {
-					offset -= 1
-				} else if offset < total {
-					offset += 1
-				}
-				offset = scroll_clamp(offset, total, view.viewport)
-				copy.offset = clamp(offset, max(0, copy.selected-view.viewport+1), copy.selected)
+			delta := 1
+			if e.button == .Wheel_Up {
+				delta = -1
 			}
+			list_scroll_to(&copy, total, view.viewport, copy.offset+delta)
 		} else if e.button == .Left && (e.action == .Press || e.action == .Drag) &&
 		          rect_contains(view.scrollbar, e.x, e.y) {
 			offset, ok := scrollbar_offset_at(view.scrollbar, .Column, total, view.viewport, e.x, e.y)
 			if !ok {
 				return {}
 			}
-			copy.offset = offset
-			if view.viewport > 0 {
-				copy.selected = clamp(copy.selected, offset, min(total-1, offset+view.viewport-1))
-			}
+			list_scroll_to(&copy, total, view.viewport, offset)
 		} else if e.button == .Left && e.action == .Press {
 			index, ok := list_index_at(&copy, total, bounds, e.x, e.y, options)
 			if !ok {

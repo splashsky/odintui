@@ -99,7 +99,17 @@ list_test_handlers :: proc(t: ^testing.T) {
 	result = list_handle(&state, 6, bounds, Mouse_Event{1, 1, .Wheel_Down, .Press, {}}, options)
 	testing.expect(t, result.changed && state == List_State{2, 2})
 	result = list_handle(&state, 6, bounds, Mouse_Event{1, 1, .Wheel_Down, .Press, {}}, options)
-	testing.expect(t, result.handled && !result.changed && state == List_State{2, 2})
+	testing.expect(t, result.changed && state == List_State{3, 3})
+	result = list_handle(&state, 6, bounds, Mouse_Event{1, 1, .Wheel_Down, .Press, {}}, options)
+	testing.expect(t, result.handled && !result.changed && state == List_State{3, 3})
+	result = list_handle(&state, 6, bounds, Mouse_Event{1, 1, .Wheel_Up, .Press, {}}, options)
+	testing.expect(t, result.changed && state == List_State{3, 2})
+
+	state = {}
+	result = list_handle(&state, 6, bounds, Mouse_Event{1, 1, .Wheel_Down, .Press, {}}, options)
+	testing.expect(t, result.changed && state == List_State{1, 1})
+
+	state = {2, 2}
 	result = list_handle(&state, 6, bounds, Mouse_Event{1, 2, .Left, .Press, {}}, options)
 	testing.expect(t, result.changed && state == List_State{4, 2})
 	result = list_handle(&state, 6, bounds, Mouse_Event{3, 2, .Left, .Drag, {}}, options)
