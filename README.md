@@ -287,6 +287,8 @@ contents, binding, or table change, call `invalidate` so the terminal sees
 updated links. The grid and URL table must not be changed during rendering;
 the extended backend and `render_linked` must use the same sidecar. Do not
 alternate between `render` and `render_linked` without invalidating the grid.
+After detaching links, set `extended.links = nil` or use the ordinary ANSI
+backend before rendering without the sidecar.
 
 ### Writing your own widget
 
