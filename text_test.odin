@@ -111,7 +111,9 @@ text_test_drawing_and_measurement_do_not_allocate :: proc(t: ^testing.T) {
 	defer grid_destroy(&grid)
 	context.allocator = allocator
 	spans := []Span{{"first ", {}}, {"界word\nlast", {}}}
-	testing.expect(t, draw_spans(&grid, Rect{0, 0, 8, 2}, spans, {wrap = .Word, ellipsis = true}) == 2)
+	testing.expect(t, draw_spans(
+		&grid, Rect{0, 0, 8, 2}, spans, {wrap = .Word, ellipsis = true, scroll = 1},
+	) == 2)
 	testing.expect(t, draw_paragraph(&grid, grid_bounds(&grid), "abc def", {}, {wrap = .Char}) == 1)
 	lines, widest := measure_spans(spans, 8, .Word)
 	testing.expect(t, lines == 3 && widest == 5)
@@ -162,6 +164,60 @@ text_test_ellipsis_respects_clip_and_empty_lines :: proc(t: ^testing.T) {
 	text_expect_row(t, &grid, 0, "ab...")
 	testing.expect(t, draw_paragraph(&grid, Rect{0, 1, 4, 1}, "\nnext", {}, {ellipsis = true}) == 1)
 	text_expect_row(t, &grid, 1, ".....")
+}
+
+@(test)
+text_test_scrolled_wrapped_lines :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	red := Style{fg = rgb(200, 0, 0)}
+	spans := []Span{{"one two ", {}}, {"three four\n", red}, {"five", {}}}
+	lines, _ := measure_spans(spans, 5, .Word)
+	testing.expect(t, lines == 5)
+	fill(&grid, 0, 0, 5, 3, {'.', {}})
+	testing.expect(t, draw_spans(
+		&grid, {0, 0, 5, 2}, spans, {wrap = .Word, scroll = 1, ellipsis = true},
+	) == 2)
+	text_expect_row(t, &grid, 0, "two..")
+	text_expect_row(t, &grid, 1, "thre…")
+	cell, _ := get_cell(&grid, 4, 1)
+	testing.expect(t, cell.style == red)
+	offset := scroll_clamp(max(int), lines, 2)
+	fill(&grid, 0, 0, 5, 3, {'.', {}})
+	testing.expect(t, draw_spans(
+		&grid, {0, 0, 5, 2}, spans, {wrap = .Word, scroll = offset, ellipsis = true},
+	) == 2)
+	text_expect_row(t, &grid, 0, "four.")
+	text_expect_row(t, &grid, 1, "five.")
+	testing.expect(t, draw_spans(&grid, {0, 0, 5, 2}, spans, {wrap = .Word, scroll = lines}) == 0)
+	testing.expect(t, draw_spans(&grid, {0, 0, 5, 2}, spans, {wrap = .Word, scroll = max(int)}) == 0)
+}
+
+@(test)
+text_test_scroll_hard_breaks_and_clipping :: proc(t: ^testing.T) {
+	grid, err := grid_init(4, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	fill(&grid, 0, 0, 4, 2, {'.', {}})
+	testing.expect(t, draw_paragraph(&grid, {0, 0, 4, 1}, "abc\nz", {}, {scroll = -1}) == 1)
+	text_expect_row(t, &grid, 0, "abc.")
+	testing.expect(t, push_clip(&grid, {1, 0, 3, 1}))
+	testing.expect(t, draw_paragraph(
+		&grid, {0, 0, 4, 2}, "skip\nabcdef\n", {}, {scroll = 1, align = .End, ellipsis = true},
+	) == 2)
+	pop_clip(&grid)
+	text_expect_row(t, &grid, 0, "abc…")
+	text_expect_row(t, &grid, 1, "....")
+	testing.expect(t, draw_paragraph(&grid, {0, 0, 4, 2}, "x\n", {}, {scroll = 1}) == 1)
+	testing.expect(t, draw_paragraph(&grid, {0, 0, 4, 2}, "x\n", {}, {scroll = 2}) == 0)
+	testing.expect(t, draw_paragraph(&grid, {0, 0, 0, 2}, "text", {}, {scroll = 1}) == 0)
+	fill(&grid, 0, 0, 4, 2, {'.', {}})
+	testing.expect(t, draw_paragraph(
+		&grid, {0, 0, 2, 2}, "abcde", {}, {wrap = .Char, scroll = 1},
+	) == 2)
+	text_expect_row(t, &grid, 0, "cd..")
+	text_expect_row(t, &grid, 1, "e...")
 }
 
 @(test)

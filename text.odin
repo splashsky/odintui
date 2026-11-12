@@ -15,11 +15,13 @@ Text_Wrap :: enum {
 	Word,
 }
 
-// Text_Options controls wrapping, per-line alignment, and truncation markers.
+// Text_Options controls wrapping, alignment, truncation markers, and the number
+// of leading visual lines to skip. Negative scroll is treated as zero.
 Text_Options :: struct {
 	wrap:     Text_Wrap,
 	align:    Align,
 	ellipsis: bool,
+	scroll:   int,
 }
 
 @(private)
@@ -160,7 +162,8 @@ measure_text :: proc(text: string, width: int, wrap: Text_Wrap) -> (lines, wides
 }
 
 // draw_spans lays out borrowed styled spans within bounds and returns the
-// number of visual lines in bounds, including empty lines and clipped lines.
+// number of visual lines in bounds after skipping options.scroll leading
+// lines, including empty lines and clipped lines. Negative scroll is zero.
 // It writes only text cells, honors the grid clip, and allocates nothing.
 // Ellipsis replaces the last text cell of a horizontally truncated line or
 // the last bounded line when more lines follow; empty lines have no cell to replace.
@@ -175,6 +178,9 @@ draw_spans :: proc(
 		return 0
 	}
 	iter: Text_Iterator
+	for skipped := 0; skipped < options.scroll && !iter.done; skipped += 1 {
+		_ = text_next_line(spans, &iter, bounds.width, options.wrap)
+	}
 	lines := 0
 	clip := current_clip(grid)
 	for !iter.done && lines < bounds.height {
@@ -212,7 +218,8 @@ draw_spans :: proc(
 	return lines
 }
 
-// draw_paragraph is the single-span convenience for draw_spans.
+// draw_paragraph is the single-span convenience for draw_spans, including its
+// scrolling, ellipsis, and returned line count semantics.
 draw_paragraph :: proc(
 	grid: ^Grid,
 	bounds: Rect,
