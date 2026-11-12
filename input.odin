@@ -45,6 +45,7 @@ Modifier :: enum {
 Modifiers :: bit_set[Modifier; u8]
 
 // Key_Event contains a key and, for Rune, its decoded Unicode scalar.
+// Invalid UTF-8 produces U+FFFD and consumes one byte.
 Key_Event :: struct {
 	key:       Key,
 	rune:      rune,
@@ -72,6 +73,7 @@ Mouse_Action :: enum {
 }
 
 // Mouse_Event contains a zero-based cell position and the mouse operation.
+// Wheel events use Press; Drag is motion with a button, Move without one.
 Mouse_Event :: struct {
 	x, y:      int,
 	button:    Mouse_Button,
@@ -86,7 +88,8 @@ Paste_Kind :: enum {
 	End,
 }
 
-// Paste_Event carries a paste boundary or a chunk borrowed from the input.
+// Paste_Event carries a paste boundary or raw bytes borrowed from the input.
+// Only Chunk events contain text; bytes are not validated or decoded.
 Paste_Event :: struct {
 	kind: Paste_Kind,
 	text: []byte,
@@ -117,8 +120,11 @@ Input_Parser :: struct {
 // input then always makes progress. Empty input always consumes zero bytes.
 // Alt+[ and Alt+O are ambiguous prefixes and also need the timeout.
 // Unsupported complete CSI/SS3 escapes are Key_Event{key = .Unknown}.
+// Kitty's basic codepoint/modifier form is supported, not event types.
+// Other ESC-prefixed bytes are treated as Alt keys, not control strings.
 // Paste chunks borrow data until the caller changes or releases that buffer.
 // During a paste, use final only at EOF: a partial end marker is then text.
+// An unterminated paste has no synthetic End event; reset the parser at EOF.
 input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Input_Event, int) {
 	if len(data) == 0 {
 		return nil, 0

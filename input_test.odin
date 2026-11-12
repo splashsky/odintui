@@ -262,7 +262,7 @@ input_test_paste_split_marker :: proc(t: ^testing.T) {
 
 @(test)
 input_test_bytewise_stream_and_iterator :: proc(t: ^testing.T) {
-	source := "é\x1b[1;5A\x1b[200~A\x1b[A🙂\x1b[201~\x1b[Iz"
+	source := "é🙂\x1b[1;5A\x1b[200~A\x1b[A🙂\x1b[201~\x1b[Iz"
 	buffer: [128]byte
 	size := 0
 	parser: Input_Parser
@@ -277,8 +277,9 @@ input_test_bytewise_stream_and_iterator :: proc(t: ^testing.T) {
 			case Key_Event:
 				switch keys {
 				case 0: testing.expect(t, e.key == .Rune && e.rune == 'é')
-				case 1: testing.expect(t, e.key == .Up && e.modifiers == {.Ctrl})
-				case 2: testing.expect(t, e.key == .Rune && e.rune == 'z')
+				case 1: testing.expect(t, e.key == .Rune && e.rune == '🙂')
+				case 2: testing.expect(t, e.key == .Up && e.modifiers == {.Ctrl})
+				case 3: testing.expect(t, e.key == .Rune && e.rune == 'z')
 				case: testing.expect(t, false)
 				}
 				keys += 1
@@ -302,7 +303,7 @@ input_test_bytewise_stream_and_iterator :: proc(t: ^testing.T) {
 		copy(buffer[:], pending)
 		size = len(pending)
 	}
-	testing.expect(t, size == 0 && starts == 1 && ends == 1 && keys == 3 && focuses == 1)
+	testing.expect(t, size == 0 && starts == 1 && ends == 1 && keys == 4 && focuses == 1)
 	testing.expect(t, string(paste_text[:paste_size]) == "A\x1b[A🙂")
 
 	pending := transmute([]byte)string("\x1b")
@@ -357,6 +358,13 @@ input_test_random_progress :: proc(t: ^testing.T) {
 		}
 		pending := buffer[:int(state%u64(len(buffer)))+1]
 		for len(pending) > 0 {
+			trial := parser
+			event, n := input_parse(&trial, pending)
+			if n < 0 || n > len(pending) || (n == 0 && trial != parser) ||
+			   (n > 0 && event == nil) {
+				testing.expect(t, false)
+				break
+			}
 			_, consumed := input_parse(&parser, pending, true)
 			if consumed <= 0 || consumed > len(pending) {
 				testing.expect(t, false)
