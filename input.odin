@@ -50,9 +50,38 @@ Key_Event :: struct {
 	modifiers: Modifiers,
 }
 
+// Mouse_Button identifies an SGR mouse button or wheel direction.
+Mouse_Button :: enum {
+	None,
+	Left,
+	Middle,
+	Right,
+	Wheel_Up,
+	Wheel_Down,
+	Wheel_Left,
+	Wheel_Right,
+}
+
+// Mouse_Action distinguishes button changes and pointer motion.
+Mouse_Action :: enum {
+	Press,
+	Release,
+	Move,
+	Drag,
+}
+
+// Mouse_Event contains a zero-based cell position and the mouse operation.
+Mouse_Event :: struct {
+	x, y:      int,
+	button:    Mouse_Button,
+	action:    Mouse_Action,
+	modifiers: Modifiers,
+}
+
 // Input_Event is a decoded terminal input event.
 Input_Event :: union {
 	Key_Event,
+	Mouse_Event,
 }
 
 // Input_Parser retains streaming state; its zero value is ready to use.
@@ -111,6 +140,9 @@ input_sequence :: proc(data: []byte) -> (Input_Event, int) {
 	for i := 2; i < len(data); i += 1 {
 		b := data[i]
 		if b >= 0x40 && b <= 0x7e {
+			if data[1] == '[' && i > 2 && data[2] == '<' {
+				return input_mouse(data[3:i], b), i+1
+			}
 			return input_sequence_key(data[2:i], b), i+1
 		}
 		if b < 0x20 || b > 0x3f {
@@ -118,6 +150,55 @@ input_sequence :: proc(data: []byte) -> (Input_Event, int) {
 		}
 	}
 	return nil, 0
+}
+
+@(private)
+input_mouse :: proc(params: []byte, final: byte) -> Input_Event {
+	unknown := Key_Event{key = .Unknown}
+	values, count, ok := input_params(params)
+	if !ok || count != 3 || len(params) == 0 || params[0] == ';' ||
+	   (final != 'M' && final != 'm') || values[0] > 127 ||
+	   values[1] <= 0 || values[2] <= 0 {
+		return unknown
+	}
+	b := values[0]
+	event := Mouse_Event{x = values[1]-1, y = values[2]-1}
+	if b & 4 != 0 {
+		event.modifiers += {.Shift}
+	}
+	if b & 8 != 0 {
+		event.modifiers += {.Alt}
+	}
+	if b & 16 != 0 {
+		event.modifiers += {.Ctrl}
+	}
+	button := b & 3
+	if b & 64 != 0 {
+		if final != 'M' || b & 32 != 0 {
+			return unknown
+		}
+		event.button = Mouse_Button(int(Mouse_Button.Wheel_Up) + button)
+		event.action = .Press
+		return event
+	}
+	switch button {
+	case 0: event.button = .Left
+	case 1: event.button = .Middle
+	case 2: event.button = .Right
+	case 3: event.button = .None
+	}
+	if final == 'm' || (button == 3 && b & 32 == 0) {
+		event.action = .Release
+	} else if b & 32 != 0 {
+		if button == 3 {
+			event.action = .Move
+		} else {
+			event.action = .Drag
+		}
+	} else {
+		event.action = .Press
+	}
+	return event
 }
 
 @(private)

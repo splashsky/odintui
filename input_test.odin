@@ -134,3 +134,47 @@ input_test_incomplete_escape :: proc(t: ^testing.T) {
 		testing.expect(t, n == 2 && key.rune == rune(data[1]))
 	}
 }
+
+@(test)
+input_test_mouse :: proc(t: ^testing.T) {
+	cases := []struct {
+		text:     string,
+		expected: Mouse_Event,
+	}{
+		{"\x1b[<0;1;1M", {0, 0, .Left, .Press, {}}},
+		{"\x1b[<1;80;25M", {79, 24, .Middle, .Press, {}}},
+		{"\x1b[<2;5;3m", {4, 2, .Right, .Release, {}}},
+		{"\x1b[<3;1;1M", {0, 0, .None, .Release, {}}},
+		{"\x1b[<35;12;13M", {11, 12, .None, .Move, {}}},
+		{"\x1b[<60;12;13M", {11, 12, .Left, .Drag, {.Shift, .Alt, .Ctrl}}},
+		{"\x1b[<64;1;1M", {0, 0, .Wheel_Up, .Press, {}}},
+		{"\x1b[<65;1;1M", {0, 0, .Wheel_Down, .Press, {}}},
+		{"\x1b[<66;1;1M", {0, 0, .Wheel_Left, .Press, {}}},
+		{"\x1b[<67;1;1M", {0, 0, .Wheel_Right, .Press, {}}},
+	}
+	parser: Input_Parser
+	for c in cases {
+		data := transmute([]byte)c.text
+		for i in 1..<len(data) {
+			_, consumed := input_parse(&parser, data[:i])
+			testing.expect(t, consumed == 0)
+		}
+		event, consumed := input_parse(&parser, data)
+		mouse, ok := event.(Mouse_Event)
+		testing.expect(t, ok && mouse == c.expected && consumed == len(data))
+	}
+	invalid := []string{
+		"\x1b[<;1;1M",
+		"\x1b[<0;0;1M",
+		"\x1b[<0;1;0M",
+		"\x1b[<0;99999999999999999999999999;1M",
+		"\x1b[<128;1;1M",
+		"\x1b[<64;1;1m",
+		"\x1b[<0;1;1;2M",
+	}
+	for text in invalid {
+		event, consumed := input_parse(&parser, transmute([]byte)text)
+		key, ok := event.(Key_Event)
+		testing.expect(t, ok && key.key == .Unknown && consumed == len(text))
+	}
+}
