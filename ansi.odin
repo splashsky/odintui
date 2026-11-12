@@ -11,6 +11,19 @@ Ansi_Color_Mode :: enum {
 	Color_16,
 }
 
+// Ansi_Terminal_Mode selects optional terminal modes controlled by the host.
+Ansi_Terminal_Mode :: enum {
+	Alt_Screen,
+	Hide_Cursor,
+	Mouse,
+	Bracketed_Paste,
+	Focus,
+	Kitty_Keyboard,
+}
+
+// Ansi_Terminal_Modes is a set of terminal modes.
+Ansi_Terminal_Modes :: bit_set[Ansi_Terminal_Mode; u8]
+
 // Ansi_Backend buffers encoded output for writer. Do not copy it or modify
 // its internal state while in use; the writer must outlive the backend.
 // A zero replacement or an unsafe replacement uses '?'. Ambiguous-width
@@ -33,6 +46,112 @@ Ansi_Backend :: struct {
 // ansi_backend returns callbacks borrowing state; state must outlive the Backend.
 ansi_backend :: proc(state: ^Ansi_Backend) -> Backend {
 	return {state, ansi_draw_run, ansi_flush}
+}
+
+// ansi_enter writes the selected mode sequences immediately. Mouse enables SGR
+// coordinates and button/drag tracking; kitty enables its basic keyboard mode.
+// Invalidate the grid after switching screens. The host owns terminal setup.
+ansi_enter :: proc(state: ^Ansi_Backend, modes: Ansi_Terminal_Modes) -> bool {
+	if state == nil {
+		return false
+	}
+	ansi_prepare(state)
+	if !ansi_reserve(state, 128) {
+		return false
+	}
+	if .Alt_Screen in modes {
+		ansi_append(state, "\x1b[?1049h")
+		state.cursor_known, state.style_known = false, false
+	}
+	if .Hide_Cursor in modes {
+		ansi_append(state, "\x1b[?25l")
+	}
+	if .Mouse in modes {
+		ansi_append(state, "\x1b[?1002h\x1b[?1006h")
+	}
+	if .Bracketed_Paste in modes {
+		ansi_append(state, "\x1b[?2004h")
+	}
+	if .Focus in modes {
+		ansi_append(state, "\x1b[?1004h")
+	}
+	if .Kitty_Keyboard in modes {
+		ansi_append(state, "\x1b[>1u")
+	}
+	return ansi_drain(state)
+}
+
+// ansi_leave reverses selected modes, then resets style and shows the cursor.
+// A failure can leave modes partially changed; the host must handle cleanup.
+ansi_leave :: proc(state: ^Ansi_Backend, modes: Ansi_Terminal_Modes) -> bool {
+	if state == nil {
+		return false
+	}
+	ansi_prepare(state)
+	if !ansi_reserve(state, 128) {
+		return false
+	}
+	if .Kitty_Keyboard in modes {
+		ansi_append(state, "\x1b[<u")
+	}
+	if .Focus in modes {
+		ansi_append(state, "\x1b[?1004l")
+	}
+	if .Bracketed_Paste in modes {
+		ansi_append(state, "\x1b[?2004l")
+	}
+	if .Mouse in modes {
+		ansi_append(state, "\x1b[?1006l\x1b[?1002l")
+	}
+	if .Hide_Cursor in modes {
+		ansi_append(state, "\x1b[?25h")
+	}
+	if .Alt_Screen in modes {
+		ansi_append(state, "\x1b[?1049l")
+		state.cursor_known = false
+	}
+	ansi_append(state, "\x1b[0m\x1b[?25h")
+	state.style, state.style_known, state.style_mode = {}, true, state.color_mode
+	return ansi_drain(state)
+}
+
+// ansi_clear resets style, clears the screen, and moves home immediately.
+// Call invalidate on the grid after clearing or resizing the terminal.
+ansi_clear :: proc(state: ^Ansi_Backend) -> bool {
+	if state == nil {
+		return false
+	}
+	ansi_prepare(state)
+	if !ansi_reserve(state, 16) {
+		return false
+	}
+	ansi_append(state, "\x1b[0m\x1b[2J\x1b[H")
+	state.style, state.style_known, state.style_mode = {}, true, state.color_mode
+	state.cursor_x, state.cursor_y, state.cursor_known = 0, 0, true
+	return ansi_drain(state)
+}
+
+// ansi_set_cursor positions the real cursor at zero-based x,y and shows or
+// hides it immediately. Negative and unrepresentable coordinates fail.
+ansi_set_cursor :: proc(state: ^Ansi_Backend, x, y: int, visible: bool) -> bool {
+	if state == nil {
+		return false
+	}
+	if x < 0 || y < 0 || x == max(int) || y == max(int) {
+		ansi_fail(state)
+		return false
+	}
+	ansi_prepare(state)
+	if !ansi_reserve(state, 64) {
+		return false
+	}
+	ansi_move(state, x, y)
+	if visible {
+		ansi_append(state, "\x1b[?25h")
+	} else {
+		ansi_append(state, "\x1b[?25l")
+	}
+	return ansi_drain(state)
 }
 
 @(private)

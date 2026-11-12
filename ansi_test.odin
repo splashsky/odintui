@@ -142,3 +142,47 @@ ansi_test_render_does_not_allocate :: proc(t: ^testing.T) {
 	set_cell(&grid, 0, 0, {'é', {}})
 	testing.expect(t, render(&grid, backend))
 }
+
+@(test)
+ansi_test_terminal_modes_and_cursor :: proc(t: ^testing.T) {
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	modes := Ansi_Terminal_Modes{
+		.Alt_Screen, .Hide_Cursor, .Mouse, .Bracketed_Paste, .Focus, .Kitty_Keyboard,
+	}
+	testing.expect(t, ansi_enter(&state, modes))
+	testing.expect_value(
+		t, ansi_test_text(&writer),
+		"\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[>1u",
+	)
+	writer.len = 0
+	testing.expect(t, ansi_set_cursor(&state, 9, 2, true))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[3;10H\x1b[?25h")
+	writer.len = 0
+	testing.expect(t, ansi_set_cursor(&state, 0, 0, false))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[?25l")
+	writer.len = 0
+	testing.expect(t, ansi_clear(&state))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[0m\x1b[2J\x1b[H")
+	writer.len = 0
+	testing.expect(t, ansi_leave(&state, modes))
+	testing.expect_value(
+		t, ansi_test_text(&writer),
+		"\x1b[<u\x1b[?1004l\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?25h\x1b[?1049l\x1b[0m\x1b[?25h",
+	)
+}
+
+@(test)
+ansi_test_mode_changes_invalidate_terminal_state :: proc(t: ^testing.T) {
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	cells := []Cell{{'a', {attributes = {.Bold}}}}
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect(t, ansi_enter(&state, {.Alt_Screen}))
+	writer.len = 0
+	testing.expect(t, backend.draw_run(backend.user_data, 1, 0, cells))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;2H\x1b[0;1ma\x1b[0m")
+}
