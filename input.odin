@@ -1,6 +1,7 @@
 package odintui
 
-// Key identifies a decoded terminal key.
+// Key identifies a decoded terminal key. Unknown reports a skipped,
+// unsupported escape sequence (or an invalid escape prefix).
 Key :: enum {
 	Rune,
 	Enter,
@@ -114,6 +115,8 @@ Input_Parser :: struct {
 // bytes and append new input before retrying when consumed is zero. Set final
 // after an escape timeout or at EOF to resolve incomplete input; nonempty
 // input then always makes progress. Empty input always consumes zero bytes.
+// Ambiguous Alt prefixes may also need the timeout. Unsupported complete
+// escapes are reported as Key_Event{key = .Unknown}.
 // Paste chunks borrow data until the caller changes or releases that buffer.
 // During a paste, use final only at EOF: a partial end marker is then text.
 input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Input_Event, int) {
@@ -255,6 +258,10 @@ input_sequence :: proc(parser: ^Input_Parser, data: []byte) -> (Input_Event, int
 			if data[1] == '[' && i > 2 && data[2] == '<' {
 				return input_mouse(data[3:i], b), i+1
 			}
+			if data[1] == 'O' && b != 'A' && b != 'B' && b != 'C' && b != 'D' &&
+			   b != 'H' && b != 'F' && b != 'P' && b != 'Q' && b != 'R' && b != 'S' {
+				return Key_Event{key = .Unknown}, i+1
+			}
 			return input_sequence_key(data[2:i], b), i+1
 		}
 		if b < 0x20 || b > 0x3f {
@@ -376,7 +383,7 @@ input_sequence_key :: proc(params: []byte, final: byte) -> Key_Event {
 		return unknown
 	}
 	if final == 'u' {
-		if count == 0 {
+		if count == 0 || params[0] == ';' {
 			return unknown
 		}
 		return input_kitty_key(values[0], mods)

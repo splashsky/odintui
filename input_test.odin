@@ -109,6 +109,9 @@ input_test_escape_keys :: proc(t: ^testing.T) {
 		{"\x1b[65;17u", {key = .Unknown}},
 		{"\x1b[55296u", {key = .Unknown}},
 		{"\x1b[1114112u", {key = .Unknown}},
+		{"\x1b[;5u", {key = .Unknown}},
+		{"\x1bO97;5u", {key = .Unknown}},
+		{"\x1bO2~", {key = .Unknown}},
 		{"\x1b[?25h", {key = .Unknown}},
 		{"\x1b[1;2:3A", {key = .Unknown}},
 	}
