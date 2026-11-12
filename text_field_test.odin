@@ -128,3 +128,25 @@ text_field_test_keys :: proc(t: ^testing.T) {
 	result = text_field_handle(&field, Key_Event{.Rune, 'x', {}})
 	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "one wo")
 }
+
+@(test)
+text_field_test_paste :: proc(t: ^testing.T) {
+	buffer: [12]byte
+	field := text_field_init(buffer[:], "a")
+	start := text_field_handle(&field, Paste_Event{kind = .Start})
+	testing.expect(t, start.handled && !start.changed)
+	chunk := transmute([]byte)string("é\n\t\x00🙂")
+	result := text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.handled && result.changed && text_field_text(&field) == "aé🙂")
+	chunk = transmute([]byte)string("\xe7\x95")
+	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.handled && !result.changed)
+	chunk = transmute([]byte)string("\x8cX")
+	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.changed && text_field_text(&field) == "aé🙂X")
+	chunk = transmute([]byte)string("12345")
+	result = text_field_handle(&field, Paste_Event{kind = .Chunk, text = chunk})
+	testing.expect(t, result.handled && !result.changed && text_field_text(&field) == "aé🙂X")
+	result = text_field_handle(&field, Paste_Event{kind = .End})
+	testing.expect(t, result.handled && !result.changed)
+}

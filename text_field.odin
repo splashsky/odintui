@@ -270,10 +270,22 @@ Text_Field_Result :: struct {
 	cancelled: bool,
 }
 
-// text_field_handle applies supported key bindings. Unsupported events and
-// modifier combinations are left unhandled for the host to route elsewhere.
-// Recognized keys remain handled even if an edit is blocked by capacity.
+// text_field_handle applies supported key bindings and paste events. Paste
+// chunks are atomic and independently decoded: invalid bytes, including bytes
+// of UTF-8 split between chunks, and controls are discarded. Paste boundaries
+// are consumed. Unsupported events and modifier combinations are unhandled;
+// recognized events remain handled even if an edit is blocked by capacity.
 text_field_handle :: proc(field: ^Text_Field, event: Input_Event) -> Text_Field_Result {
+	paste, is_paste := event.(Paste_Event)
+	if is_paste {
+		result := Text_Field_Result{handled = true}
+		if paste.kind == .Chunk {
+			old_length := field.length
+			_ = text_field_insert_string(field, string(paste.text))
+			result.changed = field.length != old_length
+		}
+		return result
+	}
 	key, ok := event.(Key_Event)
 	if !ok {
 		return {}
