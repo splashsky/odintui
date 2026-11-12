@@ -306,3 +306,28 @@ test_grid_extended_attributes_render :: proc(t: ^testing.T) {
 	testing.expect(t, render(&grid, backend))
 	testing.expect(t, mock.count == 3 && mock.screen[0][0] == Cell{'x', style})
 }
+
+@(test)
+test_grid_hex_colors :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator}
+	context.allocator = {procedure = failing_allocator_proc, data = &state}
+	valid := [5]struct{input: string, expected: Color} {
+		{"#Ab3", rgb(170, 187, 51)},
+		{"f09", rgb(255, 0, 153)},
+		{"#123aBc", rgb(18, 58, 188)},
+		{"Ff00Aa", rgb(255, 0, 170)},
+		{"000", rgb(0, 0, 0)},
+	}
+	for item in valid {
+		color, ok := hex(item.input)
+		testing.expect(t, ok && color == item.expected)
+	}
+	invalid := [12]string{
+		"", "#", "ab", "#abcd", "abcdef0", "##123", "#12g",
+		"12345g", " 123", "123\n", "ééé", "\x00123",
+	}
+	for input in invalid {
+		color, ok := hex(input)
+		testing.expect(t, !ok && color == Color{})
+	}
+}

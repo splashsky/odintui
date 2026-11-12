@@ -12,6 +12,53 @@ rgb :: proc(r, g, b: u8) -> Color {
 	return {r, g, b, true}
 }
 
+// hex parses RGB hex digits in #rgb, #rrggbb, rgb, or rrggbb form.
+// The letters are case-insensitive; invalid input returns a zero Color and false.
+hex :: proc(s: string) -> (Color, bool) {
+	digits := s
+	if len(digits) > 0 && digits[0] == '#' {
+		digits = digits[1:]
+	}
+	if len(digits) != 3 && len(digits) != 6 {
+		return {}, false
+	}
+	channels: [3]u8
+	for i in 0..<3 {
+		index := i
+		if len(digits) == 6 {
+			index *= 2
+		}
+		high, ok := grid_hex_digit(digits[index])
+		if !ok {
+			return {}, false
+		}
+		if len(digits) == 3 {
+			channels[i] = high * 17
+		} else {
+			low, valid := grid_hex_digit(digits[index+1])
+			if !valid {
+				return {}, false
+			}
+			channels[i] = (high << 4) | low
+		}
+	}
+	return rgb(channels[0], channels[1], channels[2]), true
+}
+
+@(private)
+grid_hex_digit :: proc(c: byte) -> (u8, bool) {
+	if c >= '0' && c <= '9' {
+		return c-'0', true
+	}
+	if c >= 'a' && c <= 'f' {
+		return c-'a'+10, true
+	}
+	if c >= 'A' && c <= 'F' {
+		return c-'A'+10, true
+	}
+	return 0, false
+}
+
 // Attribute is a cell style flag; backends decide how to render it.
 Attribute :: enum {
 	Bold,
