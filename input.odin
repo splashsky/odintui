@@ -153,6 +153,22 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 	return event, consumed
 }
 
+// input_next advances pending past one decoded event. It can be used as an
+// Odin for-loop iterator and stops when input_parse needs more bytes.
+input_next :: proc(
+	parser: ^Input_Parser,
+	pending: ^[]byte,
+	final := false,
+) -> (event: Input_Event, ok: bool) {
+	consumed: int
+	event, consumed = input_parse(parser, pending^, final)
+	if consumed == 0 {
+		return nil, false
+	}
+	pending^ = pending^[consumed:]
+	return event, true
+}
+
 @(private)
 input_paste :: proc(parser: ^Input_Parser, data: []byte, final: bool) -> (Input_Event, int) {
 	marker := "\x1b[201~"

@@ -1,5 +1,6 @@
 package odintui
 
+import "base:runtime"
 import "core:testing"
 
 @(test)
@@ -234,4 +235,111 @@ input_test_paste_split_marker :: proc(t: ^testing.T) {
 	event, consumed = input_parse(&parser, transmute([]byte)string("\x1b[20X"))
 	chunk, ok = event.(Paste_Event)
 	testing.expect(t, ok && chunk.kind == .Chunk && string(chunk.text) == "\x1b[20X" && consumed == 5)
+}
+
+@(test)
+input_test_bytewise_stream_and_iterator :: proc(t: ^testing.T) {
+	source := "é\x1b[1;5A\x1b[200~A\x1b[A🙂\x1b[201~\x1b[Iz"
+	buffer: [128]byte
+	size := 0
+	parser: Input_Parser
+	paste_text: [128]byte
+	paste_size, starts, ends, keys, focuses := 0, 0, 0, 0, 0
+	for b in transmute([]byte)source {
+		buffer[size] = b
+		size += 1
+		pending := buffer[:size]
+		for event in input_next(&parser, &pending) {
+			switch e in event {
+			case Key_Event:
+				switch keys {
+				case 0: testing.expect(t, e.key == .Rune && e.rune == 'é')
+				case 1: testing.expect(t, e.key == .Up && e.modifiers == {.Ctrl})
+				case 2: testing.expect(t, e.key == .Rune && e.rune == 'z')
+				case: testing.expect(t, false)
+				}
+				keys += 1
+			case Paste_Event:
+				switch e.kind {
+				case .Start: starts += 1
+				case .End: ends += 1
+				case .Chunk:
+					copy(paste_text[paste_size:], e.text)
+					paste_size += len(e.text)
+				}
+			case Focus_Event:
+				testing.expect(t, e.focused)
+				focuses += 1
+			case Mouse_Event:
+				testing.expect(t, false)
+			case:
+				testing.expect(t, false)
+			}
+		}
+		copy(buffer[:], pending)
+		size = len(pending)
+	}
+	testing.expect(t, size == 0 && starts == 1 && ends == 1 && keys == 3 && focuses == 1)
+	testing.expect(t, string(paste_text[:paste_size]) == "A\x1b[A🙂")
+
+	pending := transmute([]byte)string("\x1b")
+	for _ in input_next(&parser, &pending) {
+		testing.expect(t, false)
+	}
+	testing.expect(t, len(pending) == 1)
+	for event in input_next(&parser, &pending, true) {
+		key, ok := event.(Key_Event)
+		testing.expect(t, ok && key.key == .Escape)
+	}
+	testing.expect(t, len(pending) == 0)
+}
+
+@(test)
+input_test_no_allocations :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
+	valid := true
+	count := 0
+	{
+		previous := context.allocator
+		context.allocator = allocator
+		defer context.allocator = previous
+		parser: Input_Parser
+		pending := transmute([]byte)string("é\x1b[1;5A\x1b[<0;4;2M\x1b[I\x1b[200~\x1b[A\x1b[201~x")
+		for event in input_next(&parser, &pending) {
+			valid = valid && event != nil
+			count += 1
+		}
+		valid = valid && len(pending) == 0
+	}
+	testing.expect(t, valid && count == 8 && state.remaining == 0)
+}
+
+@(test)
+input_test_random_progress :: proc(t: ^testing.T) {
+	state: u64 = 0x1234_5678_9abc_def0
+	buffer: [64]byte
+	for iteration in 0..<12000 {
+		for &b in buffer {
+			state = state ~ (state << 13)
+			state = state ~ (state >> 7)
+			state = state ~ (state << 17)
+			b = byte(state & 0xff)
+		}
+		parser: Input_Parser
+		if iteration % 3 == 0 {
+			_, _ = input_parse(&parser, transmute([]byte)string("\x1b[200~"))
+		} else if iteration % 3 == 1 {
+			buffer[0], buffer[1] = 0x1b, '['
+		}
+		pending := buffer[:int(state%u64(len(buffer)))+1]
+		for len(pending) > 0 {
+			_, consumed := input_parse(&parser, pending, true)
+			if consumed <= 0 || consumed > len(pending) {
+				testing.expect(t, false)
+				break
+			}
+			pending = pending[consumed:]
+		}
+	}
 }
