@@ -118,6 +118,47 @@ test_paste_split_utf8 :: proc(t: ^testing.T) {
 	testing.expect(t, form.paste_n == 0)
 }
 
+@(test)
+test_custom_files_rows :: proc(t: ^testing.T) {
+	grid, err := tui.grid_init(25, 6)
+	testing.expect(t, err == .None)
+	defer tui.grid_destroy(&grid)
+	state: Files_Panel_State
+	bounds := tui.grid_bounds(&grid)
+	draw_files_panel(&grid, bounds, &state, true)
+	kind, _ := tui.get_cell(&grid, 1, 1)
+	name, _ := tui.get_cell(&grid, 6, 1)
+	size, _ := tui.get_cell(&grid, 22, 1)
+	testing.expect(t, kind.glyph == 't' && name.glyph == 'R' && size.glyph == 'B')
+	testing.expect(t, name.style.bg == color("#314b65") && kind.style.fg == color("#61dafb"))
+	_ = files_event(&state, bounds, tui.Key_Event{key = .Down})
+	testing.expect(t, state.list.selected == 1)
+	testing.expect(t, files_event(&state, bounds, tui.Key_Event{key = .Enter}))
+	_ = files_event(&state, bounds, tui.Mouse_Event{x = 23, y = 4, button = .Left, action = .Press})
+	testing.expect(t, state.list.offset > 0 && state.list.selected >= state.list.offset)
+}
+
+@(test)
+test_table_row_and_scrollbar :: proc(t: ^testing.T) {
+	grid, err := tui.grid_init(55, 9)
+	testing.expect(t, err == .None)
+	defer tui.grid_destroy(&grid)
+	state: Table_Panel_State
+	bounds := tui.grid_bounds(&grid)
+	draw_table_panel(&grid, bounds, &state, true)
+	body := state.body
+	table_event(&state, bounds, tui.Mouse_Event{
+		x = body.x+2, y = body.y+2, button = .Left, action = .Press,
+	})
+	testing.expect(t, state.list.selected == 2)
+	table_event(&state, bounds, tui.Mouse_Event{
+		x = body.x+body.width-1, y = body.y+body.height-1, button = .Left, action = .Press,
+	})
+	testing.expect(t, state.list.offset > 0 && state.list.selected >= state.list.offset)
+	table_event(&state, bounds, tui.Key_Event{key = .End})
+	testing.expect(t, state.list.selected == len(DATA_ROWS)-1)
+}
+
 Frame_Test_Backend :: struct {
 	runs, flushes: int,
 }
