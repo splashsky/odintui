@@ -26,8 +26,6 @@ text_field_test_editing :: proc(t: ^testing.T) {
 	testing.expect(t, text_field_text(&field) == "a🙂!界")
 	testing.expect(t, text_field_set_text(&field, "é\t界"))
 	testing.expect(t, text_field_text(&field) == "é界" && field.cursor == 5)
-	testing.expect(t, text_field_insert_string(&field, text_field_text(&field)))
-	testing.expect(t, text_field_text(&field) == "é界é界")
 	text_field_clear(&field)
 	testing.expect(t, !text_field_backspace(&field) && !text_field_delete(&field))
 	testing.expect(t, text_field_text(&field) == "" && field.scroll == 0)
@@ -304,74 +302,28 @@ text_field_test_render_diffs :: proc(t: ^testing.T) {
 @(test)
 text_field_test_overlapping_sources :: proc(t: ^testing.T) {
 	storage: [64]byte
-	copy(storage[:], transmute([]byte)string("é🙂Z"))
-	field := text_field_init(storage[0:32], string(storage[:7]))
-	testing.expect(t, text_field_text(&field) == "é🙂Z")
+	copy(storage[:], transmute([]byte)string("A\né🙂Z"))
+	field := text_field_init(storage[0:32], string(storage[:9]))
+	testing.expect(t, text_field_text(&field) == "Aé🙂Z")
+	source := text_field_text(&field)[1:7]
+	testing.expect(t, text_field_set_text(&field, source))
+	testing.expect(t, text_field_text(&field) == "é🙂")
+	copy(storage[:], transmute([]byte)string("abcd"))
+	before := storage
+	field = text_field_init(storage[1:32], string(storage[:4]))
+	testing.expect(t, text_field_text(&field) == "" && storage == before)
+	testing.expect(t, !text_field_set_text(&field, string(storage[:4])) && storage == before)
+}
+
+@(test)
+text_field_test_reject_overlapping_insert :: proc(t: ^testing.T) {
+	storage: [32]byte
+	field := text_field_init(storage[:], "é🙂Z")
 	text_field_home(&field)
 	text_field_right(&field)
-	source := text_field_text(&field)
-	testing.expect(t, text_field_insert_string(&field, source))
-	testing.expect(t, text_field_text(&field) == "éé🙂Z🙂Z")
-	source = text_field_text(&field)[2:7]
-	testing.expect(t, text_field_set_text(&field, source))
-	testing.expect(t, text_field_text(&field) == "é")
-	copy(storage[:], transmute([]byte)string("A\xffB\nC界D"))
-	field = text_field_init(storage[2:12], string(storage[:10]))
-	testing.expect(t, text_field_text(&field) == "ABC界D")
-	copy(storage[:], transmute([]byte)string("A\xffB\nC界D"))
-	testing.expect(t, text_field_set_text(&field, string(storage[:10])))
-	testing.expect(t, text_field_text(&field) == "ABC界D")
-}
-
-@(test)
-text_field_test_overlap_positions :: proc(t: ^testing.T) {
-	pattern := "\xffAé\x80\n🙂\u0085界Z"
-	for source_pos in 0..<8 {
-		for dest_pos in 0..<16 {
-			for size in 0..=len(pattern) {
-				for capacity in 0..=16 {
-					storage: [64]byte
-					expected_buffer: [16]byte
-					copy(storage[source_pos:], transmute([]byte)pattern)
-					expected := text_field_init(expected_buffer[:capacity], pattern[:size])
-					field := text_field_init(
-						storage[dest_pos:dest_pos+capacity],
-						string(storage[source_pos:source_pos+size]),
-					)
-					if text_field_text(&field) != text_field_text(&expected) {
-						testing.expect(t, false)
-						return
-					}
-				}
-			}
-		}
-	}
-}
-
-@(test)
-text_field_test_insert_overlapping_ranges :: proc(t: ^testing.T) {
-	initial := "é🙂界Z"
-	for start in 0..=len(initial) {
-		for end in start..=len(initial) {
-			for cursor in 0..=4 {
-				storage, expected_buffer: [64]byte
-				field := text_field_init(storage[:], initial)
-				expected := text_field_init(expected_buffer[:], initial)
-				text_field_home(&field)
-				text_field_home(&expected)
-				for _ in 0..<cursor {
-					text_field_right(&field)
-					text_field_right(&expected)
-				}
-				borrowed := text_field_text(&field)[start:end]
-				ok := text_field_insert_string(&field, borrowed)
-				expected_ok := text_field_insert_string(&expected, initial[start:end])
-				if ok != expected_ok || text_field_text(&field) != text_field_text(&expected) ||
-				   field.cursor != expected.cursor {
-					testing.expect(t, false)
-					return
-				}
-			}
-		}
-	}
+	before := storage
+	cursor := field.cursor
+	testing.expect(t, !text_field_insert_string(&field, text_field_text(&field)[2:6]))
+	testing.expect(t, storage == before && field.cursor == cursor)
+	testing.expect(t, text_field_text(&field) == "é🙂Z")
 }
