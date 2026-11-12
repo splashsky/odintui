@@ -74,6 +74,15 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 			}
 			return Key_Event{key = .Escape}, 1
 		}
+		if data[1] == '[' || data[1] == 'O' {
+			event, consumed := input_sequence(data)
+			if consumed > 0 {
+				return event, consumed
+			}
+			if !final {
+				return nil, 0
+			}
+		}
 		event, consumed := input_key(data[1:], final)
 		if consumed == 0 {
 			return nil, 0
@@ -86,6 +95,172 @@ input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Inp
 		return nil, 0
 	}
 	return event, consumed
+}
+
+@(private)
+input_sequence :: proc(data: []byte) -> (Input_Event, int) {
+	if data[1] == '[' && len(data) > 2 && data[2] == '[' {
+		if len(data) == 3 {
+			return nil, 0
+		}
+		if data[3] >= 'A' && data[3] <= 'E' {
+			return Key_Event{key = Key(int(Key.F1) + int(data[3]-'A'))}, 4
+		}
+		return Key_Event{key = .Unknown}, 3
+	}
+	for i := 2; i < len(data); i += 1 {
+		b := data[i]
+		if b >= 0x40 && b <= 0x7e {
+			return input_sequence_key(data[2:i], b), i+1
+		}
+		if b < 0x20 || b > 0x3f {
+			return Key_Event{key = .Unknown}, i
+		}
+	}
+	return nil, 0
+}
+
+@(private)
+input_params :: proc(data: []byte) -> (values: [3]int, count: int, ok: bool) {
+	if len(data) == 0 {
+		return values, 0, true
+	}
+	count = 1
+	for b in data {
+		if b == ';' {
+			count += 1
+			if count > len(values) {
+				return values, count, false
+			}
+		} else if b >= '0' && b <= '9' {
+			digit := int(b - '0')
+			if values[count-1] > (max(int)-digit)/10 {
+				return values, count, false
+			}
+			values[count-1] = values[count-1]*10 + digit
+		} else {
+			return values, count, false
+		}
+	}
+	return values, count, true
+}
+
+@(private)
+input_modifiers :: proc(value: int) -> (Modifiers, bool) {
+	value := value
+	if value == 0 {
+		value = 1
+	}
+	if value < 1 || value > 16 {
+		return {}, false
+	}
+	bits := value - 1
+	mods: Modifiers
+	if bits & 1 != 0 {
+		mods += {.Shift}
+	}
+	if bits & 2 != 0 {
+		mods += {.Alt}
+	}
+	if bits & 4 != 0 {
+		mods += {.Ctrl}
+	}
+	if bits & 8 != 0 {
+		mods += {.Super}
+	}
+	return mods, true
+}
+
+@(private)
+input_sequence_key :: proc(params: []byte, final: byte) -> Key_Event {
+	unknown := Key_Event{key = .Unknown}
+	values, count, ok := input_params(params)
+	if !ok || count > 2 {
+		return unknown
+	}
+	mods, valid_mods := input_modifiers(values[1])
+	if !valid_mods {
+		return unknown
+	}
+	if final == 'u' {
+		if count == 0 {
+			return unknown
+		}
+		return input_kitty_key(values[0], mods)
+	}
+	key := Key.Unknown
+	if final == '~' && count >= 1 {
+		switch values[0] {
+		case 1, 7: key = .Home
+		case 2:    key = .Insert
+		case 3:    key = .Delete
+		case 4, 8: key = .End
+		case 5:    key = .Page_Up
+		case 6:    key = .Page_Down
+		case 11:   key = .F1
+		case 12:   key = .F2
+		case 13:   key = .F3
+		case 14:   key = .F4
+		case 15:   key = .F5
+		case 17:   key = .F6
+		case 18:   key = .F7
+		case 19:   key = .F8
+		case 20:   key = .F9
+		case 21:   key = .F10
+		case 23:   key = .F11
+		case 24:   key = .F12
+		}
+	} else if values[0] == 0 || values[0] == 1 {
+		switch final {
+		case 'A': key = .Up
+		case 'B': key = .Down
+		case 'C': key = .Right
+		case 'D': key = .Left
+		case 'H': key = .Home
+		case 'F': key = .End
+		case 'P': key = .F1
+		case 'Q': key = .F2
+		case 'R': key = .F3
+		case 'S': key = .F4
+		case 'Z':
+			key = .Tab
+			mods += {.Shift}
+		}
+	}
+	if key == .Unknown {
+		return unknown
+	}
+	return {key = key, modifiers = mods}
+}
+
+@(private)
+input_kitty_key :: proc(code: int, mods: Modifiers) -> Key_Event {
+	event := Key_Event{key = .Rune, modifiers = mods}
+	switch code {
+	case 27, 57344: event.key = .Escape
+	case 13, 57345: event.key = .Enter
+	case 9, 57346:  event.key = .Tab
+	case 127, 57347: event.key = .Backspace
+	case 57348: event.key = .Insert
+	case 57349: event.key = .Delete
+	case 57350: event.key = .Left
+	case 57351: event.key = .Right
+	case 57352: event.key = .Up
+	case 57353: event.key = .Down
+	case 57354: event.key = .Page_Up
+	case 57355: event.key = .Page_Down
+	case 57356: event.key = .Home
+	case 57357: event.key = .End
+	case 57364..<57376:
+		event.key = Key(int(Key.F1) + code - 57364)
+	case:
+		if code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ||
+		   (code >= 57358 && code <= 57454) {
+			return {key = .Unknown}
+		}
+		event.rune = rune(code)
+	}
+	return event
 }
 
 @(private)
