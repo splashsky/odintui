@@ -67,6 +67,11 @@ app_select_page :: proc(app: ^App, page: int) {
 	app.focused = app.page_focus[chosen]
 	// Input can contain a page switch and another event in the same read.
 	_, _ = app_layout(app, app.screen)
+	if app.page == WIDGETS_PAGE {
+		text_layout(&app.text, tui.box_content(app.bounds[int(Panel.Text)]))
+		_ = form_layout(&app.form, tui.box_content(app.bounds[int(Panel.Form)]))
+		app.controls.slider = controls_slider_bounds(tui.box_content(app.bounds[int(Panel.Controls)]))
+	}
 }
 
 app_event :: proc(app: ^App, event: tui.Input_Event) {

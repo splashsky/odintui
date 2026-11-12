@@ -69,14 +69,19 @@ text_paragraph :: proc() -> [14]tui.Span {
 	return result
 }
 
-draw_text_panel :: proc(grid: ^tui.Grid, bounds: tui.Rect, state: ^Text_Panel_State, focused: bool) {
-	content := panel_box(grid, bounds, "Text", focused)
+text_layout :: proc(state: ^Text_Panel_State, content: tui.Rect) {
 	state.viewport = content
 	state.viewport.width = max(content.width-1, 0)
 	state.track = {content.x+state.viewport.width, content.y, min(content.width, 1), content.height}
 	spans := text_paragraph()
 	state.height, _ = tui.measure_spans(spans[:], state.viewport.width, .Word)
 	state.offset = tui.scroll_clamp(state.offset, state.height, state.viewport.height)
+}
+
+draw_text_panel :: proc(grid: ^tui.Grid, bounds: tui.Rect, state: ^Text_Panel_State, focused: bool) {
+	content := panel_box(grid, bounds, "Text", focused)
+	text_layout(state, content)
+	spans := text_paragraph()
 	{
 		if tui.clip_scope(grid, state.viewport) {
 			area := state.viewport
@@ -147,21 +152,29 @@ form_current :: proc(state: ^Form_Panel_State) -> ^tui.Text_Field {
 	return &state.name if state.selected == 0 else &state.password
 }
 
+form_layout :: proc(state: ^Form_Panel_State, content: tui.Rect) -> [2]tui.Rect {
+	layout := tui.layout_init(content, .Column)
+	labels: [2]tui.Rect
+	labels[0] = tui.layout_take(&layout, 1)
+	state.fields[0] = tui.layout_take(&layout, 1)
+	_ = tui.layout_take(&layout, 1)
+	labels[1] = tui.layout_take(&layout, 1)
+	state.fields[1] = tui.layout_take(&layout, 1)
+	return labels
+}
+
 draw_form_panel :: proc(grid: ^tui.Grid, bounds: tui.Rect, state: ^Form_Panel_State, focused: bool) {
 	content := panel_box(grid, bounds, "Form", focused)
-	layout := tui.layout_init(content, .Column)
+	labels := form_layout(state, content)
 	label_style := tui.Style{fg = color("#b3c5d7")}
 	field_style := tui.Style{bg = color("#263448")}
-	tui.draw_label(grid, tui.layout_take(&layout, 1), "Name", label_style)
-	state.fields[0] = tui.layout_take(&layout, 1)
+	tui.draw_label(grid, labels[0], "Name", label_style)
 	_, _, _ = tui.draw_text_field(
 		grid, state.fields[0], &state.name,
 		{style = field_style, placeholder = "your name", placeholder_style = {fg = color("#718096")},
 		 focused = focused && state.editing && state.selected == 0},
 	)
-	_ = tui.layout_take(&layout, 1)
-	tui.draw_label(grid, tui.layout_take(&layout, 1), "Password", label_style)
-	state.fields[1] = tui.layout_take(&layout, 1)
+	tui.draw_label(grid, labels[1], "Password", label_style)
 	_, _, _ = tui.draw_text_field(
 		grid, state.fields[1], &state.password,
 		{style = field_style, placeholder = "secret", placeholder_style = {fg = color("#718096")},
@@ -241,13 +254,20 @@ Controls_Panel_State :: struct {
 	dragging: bool,
 }
 
+controls_slider_bounds :: proc(content: tui.Rect) -> tui.Rect {
+	layout := tui.layout_init(content, .Column)
+	_ = tui.layout_take(&layout, 1)
+	return tui.layout_take(&layout, 1)
+}
+
 draw_controls_panel :: proc(grid: ^tui.Grid, bounds: tui.Rect, state: ^Controls_Panel_State, focused: bool) {
 	content := panel_box(grid, bounds, "Controls", focused)
 	layout := tui.layout_init(content, .Column)
 	buf: [48]byte
 	label := fmt.bprintf(buf[:], "Slider: %d%%", int(state.value*100+0.5))
 	tui.draw_label(grid, tui.layout_take(&layout, 1), label)
-	state.slider = tui.layout_take(&layout, 1)
+	state.slider = controls_slider_bounds(content)
+	_ = tui.layout_take(&layout, 1)
 	tui.draw_slider(grid, state.slider, .Row, state.value, {
 		track_style = {fg = color("#718096")}, thumb_style = {fg = color("#ffb86c")},
 	})

@@ -190,6 +190,25 @@ test_pages_focus_and_batched_events :: proc(t: ^testing.T) {
 	testing.expect(t, app.page == DATA_PAGE && app.focused == .Files)
 }
 
+@(test)
+test_page_switch_reflows_input_before_draw :: proc(t: ^testing.T) {
+	grid, err := tui.grid_init(100, 30)
+	testing.expect(t, err == .None)
+	defer tui.grid_destroy(&grid)
+	app: App
+	app_init(&app)
+	app_draw(&grid, &app)
+	app_event(&app, tui.Key_Event{key = .F2})
+	testing.expect(t, tui.grid_resize(&grid, 50, 30) == .None)
+	app_draw(&grid, &app)
+	app_event(&app, tui.Key_Event{key = .F1})
+	content := tui.box_content(app.bounds[int(Panel.Form)])
+	app_event(&app, tui.Mouse_Event{
+		x = content.x, y = content.y+4, button = .Left, action = .Press,
+	})
+	testing.expect(t, app.focused == .Form && app.form.selected == 1 && app.form.editing)
+}
+
 Frame_Test_Backend :: struct {
 	runs, flushes: int,
 }

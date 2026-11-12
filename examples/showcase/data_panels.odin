@@ -120,6 +120,7 @@ table_options :: proc() -> tui.Table_Options {
 	return {
 		borderless = true,
 		scrollbar = true,
+		// In a borderless table the scrollbar overlays the last body column.
 		padding = 1,
 		header_style = {fg = color("#61dafb"), attributes = {.Bold}},
 		border_style = {fg = color("#718096")},
