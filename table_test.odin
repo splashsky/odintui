@@ -201,3 +201,68 @@ table_test_drawing_does_not_allocate :: proc(t: ^testing.T) {
 	table_test_cell(t, &grid, 1, 3, {'j', {attributes = {.Reverse}}})
 	testing.expect(t, state.remaining == 0)
 }
+
+@(test)
+table_test_constrained_columns_and_ellipsis :: proc(t: ^testing.T) {
+	grid, err := grid_init(18, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	columns := []Table_Column{
+		{width = layout_fixed(4)},
+		{width = layout_percent(25)},
+		{width = layout_fill(1, 0, 3)},
+	}
+	rows := [][]string{{"ABCDE", "xy", "XYZ"}}
+	options := Table_Options{borderless = true, no_header = true, padding = -10}
+	draw_table(&grid, grid_bounds(&grid), columns, rows, nil, options)
+	table_test_row(t, &grid, 0, "ABC…│xy  │XYZ     ")
+	table_test_row(t, &grid, 1, "    │    │        ")
+	row, ok := table_row_at(grid_bounds(&grid), columns, 1, nil, 4, 0, options)
+	testing.expect(t, ok && row == 0)
+}
+
+@(test)
+table_test_borderless_lines_and_offscreen_geometry :: proc(t: ^testing.T) {
+	grid, err := grid_init(8, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	columns := []Table_Column{{width = layout_fixed(3)}, {}}
+	rows := [][]string{{"xxA", "B"}, {"xxC", "D"}, {"xxE", "F"}}
+	options := Table_Options{borderless = true, no_header = true, row_lines = true}
+	bounds := Rect{-2, 0, 10, 4}
+	body := draw_table(&grid, bounds, columns, rows, nil, options)
+	testing.expect(t, body == bounds)
+	table_test_row(t, &grid, 0, "A│B     ")
+	table_test_row(t, &grid, 1, "─┼──────")
+	table_test_row(t, &grid, 2, "C│D     ")
+	table_test_row(t, &grid, 3, "─┼──────")
+	row, ok := table_row_at(bounds, columns, len(rows), nil, 1, 2, options)
+	testing.expect(t, ok && row == 1)
+	_, ok = table_row_at(bounds, columns, len(rows), nil, 1, 3, options)
+	testing.expect(t, !ok)
+}
+
+@(test)
+table_test_short_viewport_and_extreme_bounds :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	columns := []Table_Column{{}}
+	rows := [][]string{{"a"}, {"b"}, {"c"}}
+	options := Table_Options{borderless = true, no_header = true, row_lines = true}
+	state := List_State{selected = 2, offset = 0}
+	row, ok := table_row_at(grid_bounds(&grid), columns, 3, &state, 0, 0, options)
+	testing.expect(t, ok && row == 2 && state.offset == 0)
+	draw_table(&grid, grid_bounds(&grid), columns, rows, &state, options)
+	testing.expect(t, state.offset == 2)
+	table_test_row(t, &grid, 0, "c    ")
+	table_test_row(t, &grid, 1, "     ")
+	_, ok = table_row_at(grid_bounds(&grid), columns, 3, &state, 0, 1, options)
+	testing.expect(t, !ok)
+	_, ok = table_row_at(grid_bounds(&grid), columns, -1, &state, 0, 0, options)
+	testing.expect(t, !ok)
+	draw_table(&grid, {0, 0, max(int), max(int)}, columns, rows, &state, options)
+	testing.expect(t, state.offset == 0)
+	table_test_cell(t, &grid, 0, 0, {'a', {}})
+	table_test_cell(t, &grid, 0, 1, {'─', {}})
+}
