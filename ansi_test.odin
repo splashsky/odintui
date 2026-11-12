@@ -5,10 +5,11 @@ import "core:io"
 import "core:testing"
 
 @(private)
-Ansi_Test_Writer :: struct {
+ansi_Test_Writer :: struct {
 	bytes:  [16384]byte,
 	len:    int,
 	writes: int,
+	limit:  int,
 	short:  bool,
 	fail:   bool,
 }
@@ -21,11 +22,14 @@ ansi_test_writer_proc :: proc(
 	offset: i64,
 	whence: io.Seek_From,
 ) -> (i64, io.Error) {
-	writer := (^Ansi_Test_Writer)(data)
+	writer := (^ansi_Test_Writer)(data)
 	if mode != .Write {
 		return 0, .Unsupported
 	}
 	n := min(len(p), len(writer.bytes)-writer.len)
+	if writer.limit > 0 {
+		n = min(n, writer.limit)
+	}
 	if writer.short && n > 0 {
 		n -= 1
 	}
@@ -39,13 +43,13 @@ ansi_test_writer_proc :: proc(
 }
 
 @(private)
-ansi_test_text :: proc(writer: ^Ansi_Test_Writer) -> string {
+ansi_test_text :: proc(writer: ^ansi_Test_Writer) -> string {
 	return string(writer.bytes[:writer.len])
 }
 
 @(test)
 ansi_test_frame_and_buffering :: proc(t: ^testing.T) {
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	bold := Style{attributes = {.Bold}}
@@ -61,13 +65,13 @@ ansi_test_frame_and_buffering :: proc(t: ^testing.T) {
 
 @(test)
 ansi_test_failure_resynchronizes :: proc(t: ^testing.T) {
-	writer := Ansi_Test_Writer{short = true}
+	writer := ansi_Test_Writer{limit = 4}
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	cells := []Cell{{'a', {attributes = {.Bold}}}}
 	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
 	testing.expect(t, !backend.flush(backend.user_data))
-	writer.short, writer.len = false, 0
+	writer.limit, writer.len = 0, 0
 	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells))
 	testing.expect(t, backend.flush(backend.user_data))
 	testing.expect_value(t, ansi_test_text(&writer), "\x18\x1b[1;1H\x1b[0;1ma\x1b[0m")
@@ -75,7 +79,7 @@ ansi_test_failure_resynchronizes :: proc(t: ^testing.T) {
 
 @(test)
 ansi_test_colors_and_attributes :: proc(t: ^testing.T) {
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	all := bit_set[Attribute; u8]{
@@ -106,8 +110,24 @@ ansi_test_colors_and_attributes :: proc(t: ^testing.T) {
 }
 
 @(test)
+ansi_test_color_changes_within_run :: proc(t: ^testing.T) {
+	writer: ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, color_mode = .Color_256}
+	backend := ansi_backend(&state)
+	style := Style{fg = rgb(0, 95, 255), bg = rgb(8, 8, 8)}
+	cells := []Cell{{'a', style}, {'b', style}}
+	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells[:1]))
+	state.color_mode = .Color_16
+	testing.expect(t, backend.draw_run(backend.user_data, 1, 0, cells[1:]))
+	testing.expect(t, backend.flush(backend.user_data))
+	testing.expect_value(
+		t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0;38;5;27;48;5;232ma\x1b[0;94;40mb\x1b[0m",
+	)
+}
+
+@(test)
 ansi_test_sanitizes_cells_and_replacement :: proc(t: ^testing.T) {
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, replacement = '·'}
 	backend := ansi_backend(&state)
 	cells := []Cell{
@@ -132,7 +152,7 @@ ansi_test_render_does_not_allocate :: proc(t: ^testing.T) {
 	grid, err := grid_init(70, 70, allocator)
 	testing.expect(t, err == .None)
 	defer grid_destroy(&grid)
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, color_mode = .Color_256}
 	backend := ansi_backend(&state)
 	fill(&grid, 0, 0, 70, 70, {'界', {fg = rgb(100, 100, 100)}})
@@ -145,7 +165,7 @@ ansi_test_render_does_not_allocate :: proc(t: ^testing.T) {
 
 @(test)
 ansi_test_terminal_modes_and_cursor :: proc(t: ^testing.T) {
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	modes := Ansi_Terminal_Modes{
 		.Alt_Screen, .Hide_Cursor, .Mouse, .Bracketed_Paste, .Focus, .Kitty_Keyboard,
@@ -174,7 +194,7 @@ ansi_test_terminal_modes_and_cursor :: proc(t: ^testing.T) {
 
 @(test)
 ansi_test_mode_changes_invalidate_terminal_state :: proc(t: ^testing.T) {
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	cells := []Cell{{'a', {attributes = {.Bold}}}}
@@ -192,7 +212,7 @@ ansi_test_render_retry_after_partial_writes :: proc(t: ^testing.T) {
 	grid, err := grid_init(2, 1)
 	testing.expect(t, err == .None)
 	defer grid_destroy(&grid)
-	writer := Ansi_Test_Writer{short = true}
+	writer := ansi_Test_Writer{short = true}
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	set_cell(&grid, 1, 0, {'x', {attributes = {.Bold}}})
@@ -208,7 +228,7 @@ ansi_test_stream_failure_during_draw :: proc(t: ^testing.T) {
 	grid, err := grid_init(5000, 1)
 	testing.expect(t, err == .None)
 	defer grid_destroy(&grid)
-	writer := Ansi_Test_Writer{fail = true}
+	writer := ansi_Test_Writer{fail = true}
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	testing.expect(t, !render(&grid, backend))
@@ -224,7 +244,7 @@ ansi_test_invalidation_after_external_changes :: proc(t: ^testing.T) {
 	grid, err := grid_init(2, 1)
 	testing.expect(t, err == .None)
 	defer grid_destroy(&grid)
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	testing.expect(t, render(&grid, backend))
@@ -238,7 +258,7 @@ ansi_test_invalidation_after_external_changes :: proc(t: ^testing.T) {
 
 @(test)
 ansi_test_invalid_arguments_and_writer :: proc(t: ^testing.T) {
-	writer: Ansi_Test_Writer
+	writer: ansi_Test_Writer
 	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
 	backend := ansi_backend(&state)
 	cells := []Cell{{'a', {}}}

@@ -24,11 +24,13 @@ Ansi_Terminal_Mode :: enum {
 // Ansi_Terminal_Modes is a set of terminal modes.
 Ansi_Terminal_Modes :: bit_set[Ansi_Terminal_Mode; u8]
 
-// Ansi_Backend buffers encoded output for writer. Do not copy it or modify
-// its internal state while in use; the writer must outlive the backend.
+// Ansi_Backend batches output to writer; flush resets SGR and writes the buffer.
+// Do not copy it or modify its internal state while in use. The writer must
+// outlive the backend, and calls require exclusive access to both.
 // A zero replacement or an unsafe replacement uses '?'. Ambiguous-width
 // characters are treated as narrow, as in unicode.normalized_east_asian_width.
-// Cursor and SGR are cached only between runs of the same frame.
+// Cursor and SGR are cached only between runs of the same frame. Short writes
+// fail; a retry cancels any interrupted escape before resynchronizing.
 Ansi_Backend :: struct {
 	writer:       io.Writer,
 	color_mode:   Ansi_Color_Mode,
@@ -49,8 +51,10 @@ ansi_backend :: proc(state: ^Ansi_Backend) -> Backend {
 	return {state, ansi_draw_run, ansi_flush}
 }
 
-// ansi_enter writes the selected mode sequences immediately. Mouse enables SGR
-// coordinates and button/drag tracking; kitty enables its basic keyboard mode.
+// ansi_enter writes the selected mode sequences immediately, between renders.
+// Mouse enables SGR coordinates and button/drag tracking; kitty enables its
+// basic keyboard mode.
+// Kitty pushes a mode, so a failed enter may require host-managed recovery.
 // Invalidate the grid after switching screens. The host owns terminal setup.
 ansi_enter :: proc(state: ^Ansi_Backend, modes: Ansi_Terminal_Modes) -> bool {
 	if state == nil {
