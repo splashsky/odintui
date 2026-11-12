@@ -28,6 +28,7 @@ Ansi_Terminal_Modes :: bit_set[Ansi_Terminal_Mode; u8]
 // its internal state while in use; the writer must outlive the backend.
 // A zero replacement or an unsafe replacement uses '?'. Ambiguous-width
 // characters are treated as narrow, as in unicode.normalized_east_asian_width.
+// Cursor and SGR are cached only between runs of the same frame.
 Ansi_Backend :: struct {
 	writer:       io.Writer,
 	color_mode:   Ansi_Color_Mode,
@@ -78,7 +79,9 @@ ansi_enter :: proc(state: ^Ansi_Backend, modes: Ansi_Terminal_Modes) -> bool {
 	if .Kitty_Keyboard in modes {
 		ansi_append(state, "\x1b[>1u")
 	}
-	return ansi_drain(state)
+	ok := ansi_drain(state)
+	state.cursor_known, state.style_known = false, false
+	return ok
 }
 
 // ansi_leave reverses selected modes, then resets style and shows the cursor.
@@ -111,8 +114,9 @@ ansi_leave :: proc(state: ^Ansi_Backend, modes: Ansi_Terminal_Modes) -> bool {
 		state.cursor_known = false
 	}
 	ansi_append(state, "\x1b[0m\x1b[?25h")
-	state.style, state.style_known, state.style_mode = {}, true, state.color_mode
-	return ansi_drain(state)
+	ok := ansi_drain(state)
+	state.cursor_known, state.style_known = false, false
+	return ok
 }
 
 // ansi_clear resets style, clears the screen, and moves home immediately.
@@ -126,9 +130,9 @@ ansi_clear :: proc(state: ^Ansi_Backend) -> bool {
 		return false
 	}
 	ansi_append(state, "\x1b[0m\x1b[2J\x1b[H")
-	state.style, state.style_known, state.style_mode = {}, true, state.color_mode
-	state.cursor_x, state.cursor_y, state.cursor_known = 0, 0, true
-	return ansi_drain(state)
+	ok := ansi_drain(state)
+	state.cursor_known, state.style_known = false, false
+	return ok
 }
 
 // ansi_set_cursor positions the real cursor at zero-based x,y and shows or
@@ -151,7 +155,9 @@ ansi_set_cursor :: proc(state: ^Ansi_Backend, x, y: int, visible: bool) -> bool 
 	} else {
 		ansi_append(state, "\x1b[?25l")
 	}
-	return ansi_drain(state)
+	ok := ansi_drain(state)
+	state.cursor_known, state.style_known = false, false
+	return ok
 }
 
 @(private)
@@ -413,6 +419,7 @@ ansi_flush :: proc(data: rawptr) -> bool {
 		return false
 	}
 	ansi_append(state, "\x1b[0m")
-	state.style, state.style_known, state.style_mode = {}, true, state.color_mode
-	return ansi_drain(state)
+	ok := ansi_drain(state)
+	state.cursor_known, state.style_known = false, false
+	return ok
 }

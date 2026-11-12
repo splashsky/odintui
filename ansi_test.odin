@@ -122,7 +122,7 @@ ansi_test_sanitizes_cells_and_replacement :: proc(t: ^testing.T) {
 	state.replacement = '\x1b'
 	testing.expect(t, backend.draw_run(backend.user_data, 0, 0, cells[2:3]))
 	testing.expect(t, backend.flush(backend.user_data))
-	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H?\x1b[0m")
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0m?\x1b[0m")
 }
 
 @(test)
@@ -185,4 +185,74 @@ ansi_test_mode_changes_invalidate_terminal_state :: proc(t: ^testing.T) {
 	testing.expect(t, backend.draw_run(backend.user_data, 1, 0, cells))
 	testing.expect(t, backend.flush(backend.user_data))
 	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;2H\x1b[0;1ma\x1b[0m")
+}
+
+@(test)
+ansi_test_render_retry_after_partial_writes :: proc(t: ^testing.T) {
+	grid, err := grid_init(2, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	writer := Ansi_Test_Writer{short = true}
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	set_cell(&grid, 1, 0, {'x', {attributes = {.Bold}}})
+	testing.expect(t, !render(&grid, backend))
+	writer.short, writer.len = false, 0
+	set_cell(&grid, 0, 0, {'z', {}})
+	testing.expect(t, render(&grid, backend))
+	testing.expect_value(t, ansi_test_text(&writer), "\x18\x1b[1;1H\x1b[0mz\x1b[0;1mx\x1b[0m")
+}
+
+@(test)
+ansi_test_stream_failure_during_draw :: proc(t: ^testing.T) {
+	grid, err := grid_init(5000, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	writer := Ansi_Test_Writer{fail = true}
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	testing.expect(t, !render(&grid, backend))
+	testing.expect(t, writer.writes == 1)
+	writer.fail, writer.len = false, 0
+	testing.expect(t, render(&grid, backend))
+	text := ansi_test_text(&writer)
+	testing.expect(t, len(text) > 5000 && text[:11] == "\x18\x1b[1;1H\x1b[0m")
+}
+
+@(test)
+ansi_test_invalidation_after_external_changes :: proc(t: ^testing.T) {
+	grid, err := grid_init(2, 1)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	testing.expect(t, render(&grid, backend))
+	testing.expect(t, ansi_set_cursor(&state, 0, 0, true))
+	// The host may have changed cursor or SGR outside this backend.
+	writer.len = 0
+	invalidate(&grid)
+	testing.expect(t, render(&grid, backend))
+	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0m  \x1b[0m")
+}
+
+@(test)
+ansi_test_invalid_arguments_and_writer :: proc(t: ^testing.T) {
+	writer: Ansi_Test_Writer
+	state := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	backend := ansi_backend(&state)
+	cells := []Cell{{'a', {}}}
+	testing.expect(t, !backend.draw_run(backend.user_data, -1, 0, cells))
+	testing.expect(t, !backend.draw_run(backend.user_data, max(int), 0, cells))
+	testing.expect(t, !backend.draw_run(backend.user_data, max(int)-1, max(int), cells))
+	testing.expect(t, !ansi_set_cursor(&state, 0, max(int), true))
+	testing.expect(t, !ansi_clear(nil))
+	testing.expect(t, !ansi_enter(nil, {}))
+	testing.expect(t, !ansi_leave(nil, {}))
+	testing.expect(t, !ansi_set_cursor(nil, 0, 0, true))
+	testing.expect(t, !ansi_backend(nil).draw_run(nil, 0, 0, cells))
+	testing.expect(t, !ansi_backend(nil).flush(nil))
+	missing_writer: Ansi_Backend
+	testing.expect(t, !ansi_clear(&missing_writer))
+	testing.expect(t, ansi_set_cursor(&state, max(int)-1, max(int)-1, true))
 }
