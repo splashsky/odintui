@@ -163,3 +163,42 @@ text_test_ellipsis_respects_clip_and_empty_lines :: proc(t: ^testing.T) {
 	testing.expect(t, draw_paragraph(&grid, Rect{0, 1, 4, 1}, "\nnext", {}, {ellipsis = true}) == 1)
 	text_expect_row(t, &grid, 1, ".....")
 }
+
+@(test)
+text_test_measurement_matches_expected_layout :: proc(t: ^testing.T) {
+	cases := []struct {
+		input:  string,
+		width:  int,
+		wrap:   Text_Wrap,
+		lines:  int,
+		widest: int,
+		rows:   []string,
+	}{
+		{"", 2, .Char, 1, 0, {"........"}},
+		{"\n", 2, .Char, 2, 0, {"........", "........"}},
+		{"one two three", 7, .Word, 2, 7, {"one two.", "three..."}},
+		{" abc  def", 4, .Word, 2, 4, {" abc....", "def....."}},
+		{"abcde fgh", 3, .Word, 3, 3, {"abc.....", "de......", "fgh....."}},
+		{"a    b", 2, .Word, 2, 1, {"a.......", "b......."}},
+		{"      ", 2, .Word, 3, 2, {"  ......", "  ......", "  ......"}},
+		{"ab\ncd\n", 2, .Char, 3, 2, {"ab......", "cd......", "........"}},
+		{"ab\r\nc", 2, .Char, 2, 2, {"ab......", "c......."}},
+		{"\rX", 1, .Char, 2, 1, {"\r.......", "X......."}},
+		{"\xffa", 2, .Char, 1, 2, {"�a......"}},
+		{"abcdef", 3, .None, 1, 6, {"abc....."}},
+	}
+	grid, err := grid_init(8, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	for item in cases {
+		fill(&grid, 0, 0, 8, 4, {'.', {}})
+		lines, widest := measure_text(item.input, item.width, item.wrap)
+		testing.expect(t, lines == item.lines && widest == item.widest)
+		testing.expect(t, draw_paragraph(
+			&grid, Rect{0, 0, item.width, 4}, item.input, {}, {wrap = item.wrap},
+		) == item.lines)
+		for row in 0..<item.lines {
+			text_expect_row(t, &grid, row, item.rows[row])
+		}
+	}
+}
