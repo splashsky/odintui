@@ -111,11 +111,55 @@ text_test_drawing_and_measurement_do_not_allocate :: proc(t: ^testing.T) {
 	defer grid_destroy(&grid)
 	context.allocator = allocator
 	spans := []Span{{"first ", {}}, {"界word\nlast", {}}}
-	testing.expect(t, draw_spans(&grid, grid_bounds(&grid), spans, {wrap = .Word}) == 3)
+	testing.expect(t, draw_spans(&grid, Rect{0, 0, 8, 2}, spans, {wrap = .Word, ellipsis = true}) == 2)
 	testing.expect(t, draw_paragraph(&grid, grid_bounds(&grid), "abc def", {}, {wrap = .Char}) == 1)
 	lines, widest := measure_spans(spans, 8, .Word)
 	testing.expect(t, lines == 3 && widest == 5)
 	lines, widest = measure_text("abcd", 2, .Char)
 	testing.expect(t, lines == 2 && widest == 2)
 	testing.expect(t, state.remaining == 0)
+}
+
+@(test)
+text_test_ellipsis_and_replaced_style :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 5)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	fill(&grid, 0, 0, 6, 5, {'.', {}})
+	red := Style{fg = rgb(255, 0, 0)}
+	bold := Style{attributes = {.Bold}}
+	spans := []Span{{"ab", red}, {"cdef\nx", bold}}
+	lines := draw_spans(&grid, Rect{1, 0, 3, 2}, spans, {ellipsis = true})
+	testing.expect(t, lines == 2)
+	text_expect_row(t, &grid, 0, ".ab…..")
+	text_expect_row(t, &grid, 1, ".x....")
+	cell, _ := get_cell(&grid, 3, 0)
+	testing.expect(t, cell.style == bold)
+	testing.expect(t, draw_paragraph(&grid, Rect{1, 2, 4, 1}, "abc", red, {ellipsis = true}) == 1)
+	text_expect_row(t, &grid, 2, ".abc..")
+	testing.expect(t, draw_paragraph(
+		&grid, Rect{1, 3, 4, 1}, "abc\nnext", red,
+		{align = .End, ellipsis = true},
+	) == 1)
+	text_expect_row(t, &grid, 3, "..ab…")
+	cell, _ = get_cell(&grid, 4, 3)
+	testing.expect(t, cell.style == red)
+	testing.expect(t, draw_paragraph(
+		&grid, Rect{0, 4, 2, 1}, "abcd", red, {wrap = .Char, ellipsis = true},
+	) == 1)
+	text_expect_row(t, &grid, 4, "a…..")
+}
+
+@(test)
+text_test_ellipsis_respects_clip_and_empty_lines :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	fill(&grid, 0, 0, 5, 2, {'.', {}})
+	testing.expect(t, push_clip(&grid, Rect{0, 0, 2, 1}))
+	testing.expect(t, draw_paragraph(&grid, Rect{0, 0, 4, 1}, "abcdef", {}, {ellipsis = true}) == 1)
+	pop_clip(&grid)
+	text_expect_row(t, &grid, 0, "ab...")
+	testing.expect(t, draw_paragraph(&grid, Rect{0, 1, 4, 1}, "\nnext", {}, {ellipsis = true}) == 1)
+	text_expect_row(t, &grid, 1, ".....")
 }

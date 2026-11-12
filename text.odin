@@ -162,6 +162,8 @@ measure_text :: proc(text: string, width: int, wrap: Text_Wrap) -> (lines, wides
 // draw_spans lays out borrowed styled spans within bounds and returns the
 // number of visual lines in bounds, including empty lines and clipped lines.
 // It writes only text cells, honors the grid clip, and allocates nothing.
+// Ellipsis replaces the last text cell of a horizontally truncated line or
+// the last bounded line when more lines follow; empty lines have no cell to replace.
 // See measure_spans for line breaking and control-rune handling.
 draw_spans :: proc(
 	grid: ^Grid,
@@ -189,12 +191,17 @@ draw_spans :: proc(
 				offset = bounds.width-visible
 			}
 			x := i128(bounds.x) + i128(offset)
+			truncated := options.ellipsis &&
+			             (line.length > bounds.width || (lines == bounds.height-1 && !iter.done))
 			cursor := line.start
 			for column in 0..<visible {
 				if x+i128(column) >= i128(clip.x)+i128(clip.width) {
 					break
 				}
 				glyph, style, _ := text_next_rune(spans, &cursor)
+				if truncated && column == visible-1 {
+					glyph = '…'
+				}
 				if x+i128(column) >= i128(clip.x) {
 					set_cell(grid, int(x+i128(column)), int(y), {glyph, style})
 				}
