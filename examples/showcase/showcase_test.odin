@@ -154,7 +154,7 @@ test_table_row_and_scrollbar :: proc(t: ^testing.T) {
 	})
 	testing.expect(t, state.list.selected == 2)
 	table_event(&state, bounds, tui.Mouse_Event{
-		x = body.x+body.width-1, y = body.y+body.height-1, button = .Left, action = .Press,
+		x = bounds.x+bounds.width-2, y = body.y+body.height-1, button = .Left, action = .Press,
 	})
 	testing.expect(t, state.list.offset > 0 && state.list.selected >= state.list.offset)
 	table_event(&state, bounds, tui.Key_Event{key = .End})

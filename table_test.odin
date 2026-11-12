@@ -152,6 +152,141 @@ table_test_scrollbars_and_custom_styles :: proc(t: ^testing.T) {
 }
 
 @(test)
+table_test_borderless_scrollbar_reserves_column :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 5)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	columns := []Table_Column{{title = "ABCDE"}}
+	rows := [][]string{{"12345"}, {"abcde"}, {"vwxyz"}, {"last"}}
+	options := Table_Options{
+		borderless = true, scrollbar = true, scrollbar_options = {track = '.', thumb = '#'},
+	}
+	state: List_State
+	body := draw_table(&grid, grid_bounds(&grid), columns, rows, &state, options)
+	testing.expect(t, body == Rect{0, 2, 4, 3})
+	table_test_row(t, &grid, 0, "ABC… ")
+	table_test_row(t, &grid, 1, "──── ")
+	table_test_row(t, &grid, 2, "123…#")
+	_, ok := table_row_at(grid_bounds(&grid), columns, len(rows), &state, 4, 2, options)
+	testing.expect(t, !ok)
+	row, hit := table_row_at(grid_bounds(&grid), columns, len(rows), &state, 3, 2, options)
+	testing.expect(t, hit && row == 0)
+
+	options.scrollbar_options.always_show = true
+	body = draw_table(&grid, grid_bounds(&grid), columns, rows[:3], &state, options)
+	testing.expect(t, body == Rect{0, 2, 5, 3})
+	table_test_row(t, &grid, 0, "ABCDE")
+	table_test_row(t, &grid, 2, "12345")
+}
+
+@(test)
+table_test_narrow_reserved_scrollbar :: proc(t: ^testing.T) {
+	grid, err := grid_init(2, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	columns := []Table_Column{{}, {}, {}}
+	rows := [][]string{{"one"}, {"two"}}
+	state: List_State
+	options := Table_Options{
+		borderless = true, scrollbar = true, scrollbar_options = {track = '.', thumb = '#'},
+	}
+	body := draw_table(&grid, grid_bounds(&grid), columns, rows, &state, options)
+	testing.expect(t, body == Rect{0, 2, 1, 1})
+	table_test_cell(t, &grid, 1, 0, BLANK_CELL)
+	table_test_cell(t, &grid, 1, 1, BLANK_CELL)
+	table_test_cell(t, &grid, 1, 2, {'#', {}})
+
+	options.no_header = true
+	body = draw_table(&grid, {0, 0, 1, 1}, columns, rows, &state, options)
+	testing.expect(t, body == Rect{0, 0, 0, 1})
+	table_test_cell(t, &grid, 0, 0, {'#', {}})
+	result := table_handle(&state, {0, 0, 1, 1}, columns, len(rows), Mouse_Event{
+		x = 0, y = 0, button = .Left, action = .Press,
+	}, options)
+	testing.expect(t, result.handled)
+	_, ok := table_row_at({0, 0, 1, 1}, columns, len(rows), &state, 0, 0, options)
+	testing.expect(t, !ok)
+}
+
+@(test)
+table_test_handle_keys_and_empty :: proc(t: ^testing.T) {
+	bounds := Rect{0, 0, 12, 9}
+	columns := []Table_Column{{title = "Name"}}
+	options := Table_Options{borderless = true, no_header = true, row_lines = true}
+	state: List_State
+	result := table_handle(&state, bounds, columns, 20, Key_Event{key = .Page_Down}, options)
+	testing.expect(t, result.handled && result.changed && !result.submitted)
+	testing.expect(t, state == List_State{selected = 5, offset = 1})
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .Page_Up}, options)
+	testing.expect(t, result.handled && state == List_State{})
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .End}, options)
+	testing.expect(t, result.handled && state == List_State{selected = 19, offset = 15})
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .Down}, options)
+	testing.expect(t, result.handled && !result.changed)
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .Up}, options)
+	testing.expect(t, result.handled && state.selected == 18)
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .Home}, options)
+	testing.expect(t, result.handled && state == List_State{})
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .Enter}, options)
+	testing.expect(t, result.handled && !result.changed && result.submitted)
+	state = {4, 3}
+	result = table_handle(&state, bounds, columns, -1, Key_Event{key = .Enter}, options)
+	testing.expect(t, result.handled && result.changed && !result.submitted && state == List_State{})
+	state = {4, 3}
+	result = table_handle(&state, bounds, columns, 20, Key_Event{key = .Left}, options)
+	testing.expect(t, result == List_Result{} && state == List_State{4, 3})
+	result = table_handle(nil, bounds, columns, 20, Key_Event{key = .Down}, options)
+	testing.expect(t, result == List_Result{})
+}
+
+@(test)
+table_test_handle_mouse_and_row_lines :: proc(t: ^testing.T) {
+	bounds := Rect{0, 0, 12, 7}
+	columns := []Table_Column{{title = "Name"}}
+	options := Table_Options{borderless = true, no_header = true, row_lines = true, scrollbar = true}
+	state: List_State
+	result := table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 1, y = 0, button = .Wheel_Down, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{1, 1})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 1, y = 0, button = .Wheel_Down, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{2, 2})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 1, y = 0, button = .Wheel_Up, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{2, 1})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 11, y = 6, button = .Left, action = .Drag,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{16, 16})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 1, y = 2, button = .Left, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{17, 16})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 1, y = 3, button = .Left, action = .Press,
+	}, options)
+	testing.expect(t, result == List_Result{} && state == List_State{17, 16})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 12, y = 2, button = .Wheel_Down, action = .Press,
+	}, options)
+	testing.expect(t, result == List_Result{} && state == List_State{17, 16})
+
+	options.borderless = false
+	state = {}
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 11, y = 5, button = .Left, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{17, 17})
+	result = table_handle(&state, bounds, columns, 20, Mouse_Event{
+		x = 1, y = 3, button = .Left, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && state == List_State{18, 17})
+}
+
+@(test)
 table_test_column_limit_and_narrow_bounds :: proc(t: ^testing.T) {
 	grid, err := grid_init(35, 4)
 	testing.expect(t, err == .None)
@@ -199,6 +334,12 @@ table_test_drawing_does_not_allocate :: proc(t: ^testing.T) {
 	row, ok := table_row_at(grid_bounds(&grid), columns, len(rows), &selection, 1, 3, options)
 	testing.expect(t, body == Rect{1, 3, 6, 1} && ok && row == 2)
 	table_test_cell(t, &grid, 1, 3, {'j', {attributes = {.Reverse}}})
+	result := table_handle(&selection, grid_bounds(&grid), columns, len(rows), Key_Event{key = .Home}, options)
+	testing.expect(t, result.handled && selection == List_State{})
+	result = table_handle(&selection, grid_bounds(&grid), columns, len(rows), Mouse_Event{
+		x = 7, y = 3, button = .Wheel_Down, action = .Press,
+	}, options)
+	testing.expect(t, result.handled && selection == List_State{1, 1})
 	testing.expect(t, state.remaining == 0)
 }
 

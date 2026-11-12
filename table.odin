@@ -31,9 +31,26 @@ Table_Options :: struct {
 
 @(private)
 Table_Geometry :: struct {
-	inner, header, header_line, body: Rect,
+	inner, header, header_line, body, scrollbar: Rect,
 	columns, separators:              [MAX_TABLE_COLUMNS]Rect,
 	count, viewport, selected, offset: int,
+}
+
+@(private)
+table_scrollbar :: proc(
+	bounds, body: Rect, row_count, viewport: int, options: Table_Options,
+) -> Rect {
+	if !options.scrollbar || max(row_count, 0) <= viewport || rect_is_empty(body) {
+		return {}
+	}
+	x, ok := widget_last_coordinate(body.x, body.width)
+	if !options.borderless {
+		x, ok = widget_last_coordinate(bounds.x, bounds.width)
+	}
+	if !ok {
+		return {}
+	}
+	return {x, body.y, 1, body.height}
 }
 
 @(private)
@@ -59,6 +76,19 @@ table_geometry :: proc(
 		result.body = rect_inset(result.body, Insets{top = result.header_line.height})
 	}
 
+	result.viewport = result.body.height
+	if options.row_lines {
+		result.viewport = result.body.height/2 + result.body.height%2
+	}
+	result.scrollbar = table_scrollbar(bounds, result.body, row_count, result.viewport, options)
+	column_bounds := result.inner
+	if options.borderless && !rect_is_empty(result.scrollbar) {
+		column_bounds.width -= 1
+		result.header.width = min(result.header.width, column_bounds.width)
+		result.header_line.width = min(result.header_line.width, column_bounds.width)
+		result.body.width -= 1
+	}
+
 	result.count = min(len(columns), MAX_TABLE_COLUMNS)
 	constraints: [MAX_TABLE_COLUMNS]Constraint
 	for i in 0..<result.count {
@@ -68,12 +98,12 @@ table_geometry :: proc(
 	if !options.no_column_lines {
 		gap = 1
 	}
-	layout_split(result.inner, .Row, constraints[:result.count], result.columns[:result.count], gap)
+	layout_split(column_bounds, .Row, constraints[:result.count], result.columns[:result.count], gap)
 	for i in 0..<result.count {
 		column := result.columns[i]
 		if gap != 0 && i+1 < result.count && column.x <= max(int)-column.width {
 			x := column.x + column.width
-			if rect_contains(result.inner, x, result.inner.y) {
+			if rect_contains(column_bounds, x, column_bounds.y) {
 				result.separators[i] = {x, result.inner.y, 1, result.inner.height}
 			}
 		}
@@ -82,10 +112,6 @@ table_geometry :: proc(
 		})
 	}
 
-	result.viewport = result.body.height
-	if options.row_lines {
-		result.viewport = result.body.height/2 + result.body.height%2
-	}
 	total := max(row_count, 0)
 	if state != nil && total > 0 {
 		result.selected = clamp(state.selected, 0, total-1)
@@ -125,7 +151,8 @@ table_horizontal :: proc(
 // Missing cells are empty and extra cells are ignored. A nil state disables
 // selection and scrolling; otherwise selection and row offset are clamped and
 // kept visible. The returned body rectangle includes any row separator lines.
-// A scrollbar overlays the right border, or the last body column if borderless.
+// When rows overflow, a scrollbar overlays the right border or reserves the
+// last column in a borderless table (including its header and body).
 draw_table :: proc(
 	grid: ^Grid, bounds: Rect, columns: []Table_Column, rows: [][]string,
 	state: ^List_State = nil, options: Table_Options = {},
@@ -217,31 +244,28 @@ draw_table :: proc(
 			}
 		}
 	}
-	if options.scrollbar && !rect_is_empty(geometry.body) {
-		track := geometry.body
-		x, ok := widget_last_coordinate(track.x, track.width)
-		if !options.borderless {
-			x, ok = widget_last_coordinate(bounds.x, bounds.width)
-		}
-		if ok {
-			track.x = x
-		} else {
-			track.width = 0
-		}
-		draw_scrollbar(grid, track, .Column, len(rows), geometry.viewport, geometry.offset,
+	if !rect_is_empty(geometry.scrollbar) {
+		draw_scrollbar(grid, geometry.scrollbar, .Column, len(rows), geometry.viewport, geometry.offset,
 		               options.scrollbar_options)
 	}
 	return geometry.body
 }
 
 // table_row_at maps a point on a body row to its index without changing state.
-// Header, row separator, empty, and outside cells return false. Column lines
-// and a borderless scrollbar still count as part of the row.
+// Header, row separator, scrollbar, empty, and outside cells return false.
+// Column lines count as part of the row.
 table_row_at :: proc(
 	bounds: Rect, columns: []Table_Column, row_count: int, state: ^List_State,
 	x, y: int, options: Table_Options = {},
 ) -> (row: int, ok: bool) {
 	geometry := table_geometry(bounds, columns, row_count, state, options)
+	return table_geometry_row_at(geometry, row_count, x, y, options)
+}
+
+@(private)
+table_geometry_row_at :: proc(
+	geometry: Table_Geometry, row_count, x, y: int, options: Table_Options,
+) -> (row: int, ok: bool) {
 	if !rect_contains(geometry.body, x, y) {
 		return 0, false
 	}
@@ -256,4 +280,78 @@ table_row_at :: proc(
 		return 0, false
 	}
 	return geometry.offset+distance, true
+}
+
+// table_handle processes Up/Down, Page Up/Down, Home, End, Enter, and mouse input.
+// Page movement uses the visible row count, including with row separators.
+// Wheel presses scroll one row; scrollbar presses and drags jump. Scrolling
+// moves selection minimally to keep it visible. A left press on a row selects it.
+// Mouse events outside bounds, nil state, and unsupported events are unhandled;
+// Enter submits only when rows exist.
+table_handle :: proc(
+	state: ^List_State, bounds: Rect, columns: []Table_Column, row_count: int,
+	event: Input_Event, options: Table_Options = {},
+) -> List_Result {
+	if state == nil {
+		return {}
+	}
+	before := state^
+	total := max(row_count, 0)
+	#partial switch e in event {
+	case Key_Event:
+		#partial switch e.key {
+		case .Up, .Down, .Page_Up, .Page_Down, .Home, .End, .Enter:
+		case:
+			return {}
+		}
+		geometry := table_geometry(bounds, columns, total, state, options)
+		state.selected, state.offset = geometry.selected, geometry.offset
+		#partial switch e.key {
+		case .Up:        list_move(state, total, -1)
+		case .Down:      list_move(state, total, 1)
+		case .Page_Up:   list_move(state, total, -max(geometry.viewport, 1))
+		case .Page_Down: list_move(state, total, max(geometry.viewport, 1))
+		case .Home:      list_first(state)
+		case .End:       list_last(state, total)
+		case .Enter:
+		case:
+		}
+		geometry = table_geometry(bounds, columns, total, state, options)
+		state.selected, state.offset = geometry.selected, geometry.offset
+		return {true, state^ != before, e.key == .Enter && total > 0}
+	case Mouse_Event:
+		if !rect_contains(bounds, e.x, e.y) {
+			return {}
+		}
+		geometry := table_geometry(bounds, columns, total, state, options)
+		copy := List_State{geometry.selected, geometry.offset}
+		if e.action == .Press && (e.button == .Wheel_Up || e.button == .Wheel_Down) {
+			delta := 1
+			if e.button == .Wheel_Up {
+				delta = -1
+			}
+			list_scroll_to(&copy, total, geometry.viewport, copy.offset+delta)
+		} else if e.button == .Left && (e.action == .Press || e.action == .Drag) &&
+		          rect_contains(geometry.scrollbar, e.x, e.y) {
+			offset, ok := scrollbar_offset_at(
+				geometry.scrollbar, .Column, total, geometry.viewport, e.x, e.y,
+			)
+			if !ok {
+				return {}
+			}
+			list_scroll_to(&copy, total, geometry.viewport, offset)
+		} else if e.button == .Left && e.action == .Press {
+			row, ok := table_geometry_row_at(geometry, total, e.x, e.y, options)
+			if !ok {
+				return {}
+			}
+			copy.selected = row
+		} else {
+			return {}
+		}
+		state^ = copy
+		return {handled = true, changed = state^ != before}
+	case:
+		return {}
+	}
 }
