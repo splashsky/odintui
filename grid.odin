@@ -116,6 +116,7 @@ Grid :: struct {
 	presented_valid:        bool,
 	clips:                  [MAX_CLIP_DEPTH]Rect,
 	clip_depth:             int,
+	clip:                   Rect, // Top clip intersected with bounds; cached for set_cell.
 }
 
 // grid_init creates a blank grid. The allocator must outlive the grid.
@@ -204,6 +205,7 @@ grid_resize :: proc(grid: ^Grid, width, height: int) -> Grid_Error {
 	grid.dirty_start = 0
 	grid.dirty_end = len(dirty)
 	grid.presented_valid = false
+	grid_update_clip(grid)
 	return .None
 }
 
@@ -227,6 +229,7 @@ push_clip :: proc(grid: ^Grid, rect: Rect) -> bool {
 	}
 	grid.clips[grid.clip_depth] = effective
 	grid.clip_depth += 1
+	grid_update_clip(grid)
 	return true
 }
 
@@ -234,15 +237,21 @@ push_clip :: proc(grid: ^Grid, rect: Rect) -> bool {
 pop_clip :: proc(grid: ^Grid) {
 	if grid.clip_depth > 0 {
 		grid.clip_depth -= 1
+		grid_update_clip(grid)
 	}
 }
 
 // current_clip returns the effective clip intersected with current grid bounds.
 current_clip :: proc(grid: ^Grid) -> Rect {
-	if grid.clip_depth == 0 {
-		return grid_bounds(grid)
+	return grid.clip
+}
+
+@(private)
+grid_update_clip :: proc(grid: ^Grid) {
+	grid.clip = grid_bounds(grid)
+	if grid.clip_depth > 0 {
+		grid.clip = rect_intersect(grid.clips[grid.clip_depth-1], grid.clip)
 	}
-	return rect_intersect(grid.clips[grid.clip_depth-1], grid_bounds(grid))
 }
 
 // clip_scope pushes a clip and automatically pops it at the end of the scope
@@ -261,7 +270,9 @@ clip_scope_end :: proc(grid: ^Grid, rect: Rect, pushed: bool) {
 
 // set_cell returns false for coordinates outside the grid or current clip.
 set_cell :: proc(grid: ^Grid, x, y: int, cell: Cell) -> bool {
-	if !rect_contains(current_clip(grid), x, y) {
+	// The cached clip lies within the grid, so its far edges cannot overflow.
+	clip := grid.clip
+	if x < clip.x || y < clip.y || x >= clip.x+clip.width || y >= clip.y+clip.height {
 		return false
 	}
 	index := y*grid.width + x
