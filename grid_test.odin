@@ -149,3 +149,99 @@ test_text_invalid_utf8 :: proc(t: ^testing.T) {
 	cell, _ = get_cell(&grid, 2, 0)
 	testing.expect(t, cell.glyph == 'b')
 }
+
+@(test)
+test_grid_nested_clips_and_resize :: proc(t: ^testing.T) {
+	grid, err := grid_init(5, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	pop_clip(&grid)
+	testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+	testing.expect(t, push_clip(&grid, Rect{1, 0, 6, 3}))
+	testing.expect(t, current_clip(&grid) == Rect{1, 0, 4, 3})
+	testing.expect(t, push_clip(&grid, Rect{2, 1, 2, 2}))
+	testing.expect(t, current_clip(&grid) == Rect{2, 1, 2, 2})
+	testing.expect(t, !set_cell(&grid, 1, 1, {'!', {}}))
+	testing.expect(t, set_cell(&grid, 2, 1, {'x', {}}))
+	cell, ok := get_cell(&grid, 1, 1)
+	testing.expect(t, ok && cell == BLANK_CELL)
+	draw_text(&grid, 0, 1, "abcde")
+	fill(&grid, -1, 2, max(int), 1, {'f', {}})
+	draw_border(&grid, Rect{0, 0, 5, 3})
+	cell, _ = get_cell(&grid, 2, 1)
+	testing.expect(t, cell.glyph == 'c')
+	cell, _ = get_cell(&grid, 3, 1)
+	testing.expect(t, cell.glyph == 'd')
+	cell, _ = get_cell(&grid, 2, 2)
+	testing.expect(t, cell.glyph == '-')
+	cell, _ = get_cell(&grid, 4, 2)
+	testing.expect(t, cell == BLANK_CELL)
+	pop_clip(&grid)
+
+	testing.expect(t, grid_resize(&grid, 3, 3) == .None)
+	testing.expect(t, current_clip(&grid) == Rect{1, 0, 2, 3})
+	testing.expect(t, grid_resize(&grid, 8, 3) == .None)
+	testing.expect(t, current_clip(&grid) == Rect{1, 0, 6, 3})
+	pop_clip(&grid)
+	testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+	testing.expect(t, push_clip(&grid, Rect{min(int), 0, max(int), 1}))
+	testing.expect(t, rect_is_empty(current_clip(&grid)))
+	testing.expect(t, !set_cell(&grid, 0, 0, {'!', {}}))
+	grid_destroy(&grid)
+	testing.expect(t, grid.clip_depth == 0)
+}
+
+@(test)
+test_grid_clip_scope :: proc(t: ^testing.T) {
+	grid, err := grid_init(4, 4)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	{
+		if clip_scope(&grid, Rect{1, 1, 2, 2}) {
+			testing.expect(t, current_clip(&grid) == Rect{1, 1, 2, 2})
+			if clip_scope(&grid, Rect{2, 0, 2, 4}) {
+				testing.expect(t, current_clip(&grid) == Rect{2, 1, 1, 2})
+			}
+			testing.expect(t, current_clip(&grid) == Rect{1, 1, 2, 2})
+		}
+		testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+	}
+	for _ in 0..<MAX_CLIP_DEPTH {
+		testing.expect(t, push_clip(&grid, Rect{1, 1, 2, 2}))
+	}
+	{
+		if clip_scope(&grid, Rect{0, 0, 1, 1}) {
+			testing.expect(t, false)
+		}
+	}
+	testing.expect(t, grid.clip_depth == MAX_CLIP_DEPTH)
+	for _ in 0..<MAX_CLIP_DEPTH {
+		pop_clip(&grid)
+	}
+	testing.expect(t, current_clip(&grid) == grid_bounds(&grid))
+}
+
+@(test)
+test_grid_clipped_drawing_does_not_allocate :: proc(t: ^testing.T) {
+	state := Failing_Allocator{backing = context.allocator, remaining = 3}
+	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
+	grid, err := grid_init(4, 3, allocator)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	context.allocator = allocator
+	testing.expect(t, state.remaining == 0)
+	{
+		if clip_scope(&grid, Rect{1, 1, 2, 1}) {
+			fill(&grid, 0, 0, 4, 3, {'x', {}})
+			draw_text(&grid, 0, 1, "abcd")
+			draw_label(&grid, Rect{0, 1, 4, 1}, "1234")
+			set_cell(&grid, 2, 1, {'z', {}})
+		}
+	}
+	cell, _ := get_cell(&grid, 1, 1)
+	testing.expect(t, cell.glyph == '2')
+	cell, _ = get_cell(&grid, 2, 1)
+	testing.expect(t, cell.glyph == 'z')
+	cell, _ = get_cell(&grid, 0, 1)
+	testing.expect(t, cell == BLANK_CELL)
+}

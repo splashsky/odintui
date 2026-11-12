@@ -50,6 +50,9 @@ Dirty_Row :: struct {
 	start, end: int, // Half-open; equal bounds mean the row is clean.
 }
 
+// MAX_CLIP_DEPTH is the maximum number of nested clips.
+MAX_CLIP_DEPTH :: 16
+
 // Grid owns its buffers. Do not copy it or modify its fields directly.
 Grid :: struct {
 	width, height:          int,
@@ -59,6 +62,8 @@ Grid :: struct {
 	dirty:                  []Dirty_Row,
 	dirty_start, dirty_end: int,
 	presented_valid:        bool,
+	clips:                  [MAX_CLIP_DEPTH]Rect,
+	clip_depth:             int,
 }
 
 // grid_init creates a blank grid. The allocator must outlive the grid.
@@ -68,7 +73,7 @@ grid_init :: proc(width, height: int, allocator := context.allocator) -> (Grid, 
 	return grid, err
 }
 
-// grid_destroy releases the grid's buffers; it is safe to call again.
+// grid_destroy releases the grid's buffers and resets its clips; it is safe to call again.
 grid_destroy :: proc(grid: ^Grid) {
 	if len(grid.cells) > 0 {
 		delete(grid.cells, grid.allocator)
@@ -86,6 +91,7 @@ grid_bounds :: proc(grid: ^Grid) -> Rect {
 // grid_resize preserves the overlapping cells and blanks newly exposed cells.
 // On error the grid is unchanged. The host/backend handles size changes,
 // including clearing any former viewport outside a smaller grid.
+// Clips remain in grid coordinates and are intersected with the current bounds.
 grid_resize :: proc(grid: ^Grid, width, height: int) -> Grid_Error {
 	if width < 0 || height < 0 {
 		return .Invalid_Dimensions
@@ -157,9 +163,53 @@ get_cell :: proc(grid: ^Grid, x, y: int) -> (Cell, bool) {
 	return grid.cells[y*grid.width+x], true
 }
 
-// set_cell returns false for coordinates outside the grid.
+// push_clip intersects rect with the preceding clip; it fails if the stack is full.
+// Clips are stored independently of grid bounds so resizing can expose them again.
+push_clip :: proc(grid: ^Grid, rect: Rect) -> bool {
+	if grid.clip_depth == MAX_CLIP_DEPTH {
+		return false
+	}
+	effective := rect_intersect(rect, rect)
+	if grid.clip_depth > 0 {
+		effective = rect_intersect(grid.clips[grid.clip_depth-1], effective)
+	}
+	grid.clips[grid.clip_depth] = effective
+	grid.clip_depth += 1
+	return true
+}
+
+// pop_clip removes the most recent clip, or does nothing if the stack is empty.
+pop_clip :: proc(grid: ^Grid) {
+	if grid.clip_depth > 0 {
+		grid.clip_depth -= 1
+	}
+}
+
+// current_clip returns the effective clip intersected with current grid bounds.
+current_clip :: proc(grid: ^Grid) -> Rect {
+	if grid.clip_depth == 0 {
+		return grid_bounds(grid)
+	}
+	return rect_intersect(grid.clips[grid.clip_depth-1], grid_bounds(grid))
+}
+
+// clip_scope pushes a clip and automatically pops it at the end of the scope
+// containing the call, but only if the push succeeded.
+@(deferred_in_out=clip_scope_end)
+clip_scope :: proc(grid: ^Grid, rect: Rect) -> bool {
+	return push_clip(grid, rect)
+}
+
+@(private)
+clip_scope_end :: proc(grid: ^Grid, rect: Rect, pushed: bool) {
+	if pushed {
+		pop_clip(grid)
+	}
+}
+
+// set_cell returns false for coordinates outside the grid or current clip.
 set_cell :: proc(grid: ^Grid, x, y: int, cell: Cell) -> bool {
-	if x < 0 || y < 0 || x >= grid.width || y >= grid.height {
+	if !rect_contains(current_clip(grid), x, y) {
 		return false
 	}
 	index := y*grid.width + x
@@ -183,17 +233,19 @@ set_cell :: proc(grid: ^Grid, x, y: int, cell: Cell) -> bool {
 }
 
 // draw_text draws one decoded rune per cell on one row, including controls.
-// It clips at the grid edges; backends handle sanitization and glyph widths.
+// It clips to the current clip and grid; backends handle sanitization and widths.
 draw_text :: proc(grid: ^Grid, x, y: int, text: string, style: Style = {}) {
-	if y < 0 || y >= grid.height || grid.width == 0 || x >= grid.width {
+	clip := current_clip(grid)
+	if rect_is_empty(clip) || y < clip.y || y >= clip.y+clip.height ||
+	   x >= clip.x+clip.width {
 		return
 	}
 	column := x
 	for glyph in text {
-		if column >= grid.width {
+		if column >= clip.x+clip.width {
 			break
 		}
-		if column >= 0 {
+		if column >= clip.x {
 			set_cell(grid, column, y, {glyph, style})
 		}
 		column += 1
