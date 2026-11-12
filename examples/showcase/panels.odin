@@ -2,6 +2,7 @@ package main
 
 import tui "../.."
 import "core:fmt"
+import "core:unicode/utf8"
 
 color :: proc(value: string) -> tui.Color {
 	result, _ := tui.hex(value)
@@ -133,6 +134,8 @@ Form_Panel_State :: struct {
 	fields:                       [2]tui.Rect,
 	selected:                     int,
 	editing:                      bool,
+	paste_tail:                   [utf8.UTF_MAX]byte,
+	paste_n:                      int,
 }
 
 form_init :: proc(state: ^Form_Panel_State) {
@@ -168,6 +171,14 @@ draw_form_panel :: proc(grid: ^tui.Grid, bounds: tui.Rect, state: ^Form_Panel_St
 
 // Returns true for a submission; the caller decides how to present it.
 form_event :: proc(state: ^Form_Panel_State, event: tui.Input_Event) -> bool {
+	if paste, ok := event.(tui.Paste_Event); ok {
+		if paste.kind == .Start || paste.kind == .End || !state.editing {
+			state.paste_n = 0
+		} else {
+			form_paste(state, paste.text)
+		}
+		return false
+	}
 	if key, ok := event.(tui.Key_Event); ok {
 		if key.modifiers == {} {
 			#partial switch key.key {
@@ -186,6 +197,31 @@ form_event :: proc(state: ^Form_Panel_State, event: tui.Input_Event) -> bool {
 		return tui.text_field_handle(form_current(state), event).submitted
 	}
 	return false
+}
+
+// Paste chunks can split UTF-8 codepoints across terminal reads.
+form_paste :: proc(state: ^Form_Panel_State, bytes: []byte) {
+	field := form_current(state)
+	i := 0
+	for state.paste_n > 0 && i < len(bytes) {
+		state.paste_tail[state.paste_n] = bytes[i]
+		state.paste_n += 1
+		i += 1
+		if utf8.full_rune(state.paste_tail[:state.paste_n]) {
+			_ = tui.text_field_insert_string(field, string(state.paste_tail[:state.paste_n]))
+			state.paste_n = 0
+		}
+	}
+	start := i
+	for i < len(bytes) {
+		if !utf8.full_rune(bytes[i:]) {
+			state.paste_n = copy(state.paste_tail[:], bytes[i:])
+			break
+		}
+		_, size := utf8.decode_rune(bytes[i:])
+		i += size
+	}
+	_ = tui.text_field_insert_string(field, string(bytes[start:i]))
 }
 
 form_mouse :: proc(state: ^Form_Panel_State, mouse: tui.Mouse_Event) {

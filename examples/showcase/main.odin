@@ -147,17 +147,16 @@ app_draw :: proc(grid: ^tui.Grid, app: ^App) {
 	tui.draw_label(grid, status, text, {fg = color("#c7d8e8"), bg = color("#263448")})
 }
 
-run :: proc() -> bool {
+run :: proc() -> string {
 	term: Terminal
 	defer terminal_close(&term)
 	if !terminal_open(&term) {
-		fmt.eprintln("showcase: requires a terminal on stdin and stdout; unable to enter raw mode")
-		return false
+		return "showcase: requires a terminal on stdin and stdout; unable to enter raw mode"
 	}
 	width, height := terminal_size()
 	grid, err := tui.grid_init(width, height)
 	if err != .None {
-		return false
+		return "showcase: unable to allocate the grid"
 	}
 	defer tui.grid_destroy(&grid)
 	app: App
@@ -167,7 +166,7 @@ run :: proc() -> bool {
 		width, height = terminal_size()
 		if width != grid.width || height != grid.height {
 			if tui.grid_resize(&grid, width, height) != .None || !tui.ansi_clear(&term.ansi) {
-				return false
+				return "showcase: resize or terminal clear failed"
 			}
 			tui.invalidate(&grid)
 			redraw = true
@@ -175,23 +174,26 @@ run :: proc() -> bool {
 		if redraw {
 			app_draw(&grid, &app)
 			if !tui.render(&grid, tui.ansi_backend(&term.ansi)) {
-				return false
+				return "showcase: terminal render failed"
 			}
 			redraw = false
 		}
 		switch terminal_poll(&term, &app) {
 		case .Input: redraw = true
-		case .Closed: return true
-		case .Error: return false
+		case .Closed: return ""
+		case .Error: return "showcase: terminal input failed"
 		case .Waiting:
 		}
 	}
-	return intrinsics.atomic_load(&terminal_signal) == 0
+	if intrinsics.atomic_load(&terminal_signal) != 0 {
+		return "showcase: terminated by signal"
+	}
+	return ""
 }
 
 main :: proc() {
-	if !run() {
-		fmt.eprintln("showcase: terminal or rendering failed")
+	if message := run(); len(message) > 0 {
+		fmt.eprintln(message)
 		os.exit(1)
 	}
 }

@@ -33,6 +33,15 @@ Terminal :: struct {
 
 TERMINAL_SIGNALS :: [5]posix.Signal{.SIGINT, .SIGTERM, .SIGHUP, .SIGQUIT, .SIGPIPE}
 
+terminal_set_attributes :: proc(attributes: ^posix.termios) -> bool {
+	for posix.tcsetattr(posix.STDIN_FILENO, .TCSANOW, attributes) != .OK {
+		if posix.errno() != .EINTR {
+			return false
+		}
+	}
+	return true
+}
+
 terminal_open :: proc(term: ^Terminal) -> bool {
 	if !posix.isatty(posix.STDIN_FILENO) || !posix.isatty(posix.STDOUT_FILENO) {
 		return false
@@ -61,7 +70,7 @@ terminal_open :: proc(term: ^Terminal) -> bool {
 	raw.c_lflag -= {.ECHO, .ECHONL, .ICANON, .ISIG, .IEXTEN}
 	raw.c_cc[.VMIN] = 1
 	raw.c_cc[.VTIME] = 0
-	if posix.tcsetattr(posix.STDIN_FILENO, .TCSANOW, &raw) != .OK {
+	if !terminal_set_attributes(&raw) {
 		return false
 	}
 	term.raw = true
@@ -76,7 +85,7 @@ terminal_close :: proc(term: ^Terminal) {
 		_ = tui.ansi_leave(&term.ansi, TERMINAL_MODES)
 	}
 	if term.raw {
-		_ = posix.tcsetattr(posix.STDIN_FILENO, .TCSANOW, &term.saved)
+		_ = terminal_set_attributes(&term.saved)
 	}
 	signals := TERMINAL_SIGNALS
 	for i := term.signals-1; i >= 0; i -= 1 {
