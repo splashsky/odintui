@@ -266,6 +266,43 @@ input_test_paste_split_marker :: proc(t: ^testing.T) {
 }
 
 @(test)
+input_test_paste_utf8_boundaries :: proc(t: ^testing.T) {
+	parser := Input_Parser{in_paste = true}
+	valid := []string{"é", "界", "🙂"}
+	for text in valid {
+		data := transmute([]byte)text
+		for i in 1..<len(data) {
+			_, consumed := input_parse(&parser, data[:i])
+			testing.expect(t, consumed == 0)
+			event, n := input_parse(&parser, data[:i], true)
+			chunk, ok := event.(Paste_Event)
+			testing.expect(t, ok && string(chunk.text) == text[:i] && n == i)
+		}
+		event, consumed := input_parse(&parser, data)
+		chunk, ok := event.(Paste_Event)
+		testing.expect(t, ok && string(chunk.text) == text && consumed == len(data))
+	}
+	invalid := []string{"\x80", "\xc0", "\xe0\x80", "\xed\xa0", "\xf0\x80",
+	                    "\xf4\x90", "\xf0\x9fX", "\xe2\x82\x80\x80"}
+	for text in invalid {
+		event, consumed := input_parse(&parser, transmute([]byte)text)
+		chunk, ok := event.(Paste_Event)
+		testing.expect(t, ok && string(chunk.text) == text && consumed == len(text))
+	}
+	data := transmute([]byte)string("a\xff\xf0\x9f\x99")
+	event, consumed := input_parse(&parser, data)
+	chunk, ok := event.(Paste_Event)
+	testing.expect(t, ok && string(chunk.text) == "a\xff" && consumed == 2)
+	data = transmute([]byte)string("\xe2\x82\x1b[201~")
+	event, consumed = input_parse(&parser, data)
+	chunk, ok = event.(Paste_Event)
+	testing.expect(t, ok && string(chunk.text) == "\xe2\x82" && consumed == 2)
+	event, consumed = input_parse(&parser, data[consumed:])
+	end, end_ok := event.(Paste_Event)
+	testing.expect(t, end_ok && end.kind == .End && consumed == 6)
+}
+
+@(test)
 input_test_bytewise_stream_and_iterator :: proc(t: ^testing.T) {
 	source := "é🙂\x1b[1;5A\x1b[200~A\x1b[A🙂\x1b[201~\x1b[Iz"
 	buffer: [128]byte

@@ -124,6 +124,8 @@ Input_Parser :: struct {
 // Caps/Num Lock modifier bits are ignored; Hyper and Meta are unsupported.
 // Other ESC-prefixed bytes are treated as Alt keys, not control strings.
 // Paste chunks borrow data until the caller changes or releases that buffer.
+// Unless final is set, a chunk at the end of input holds back an incomplete
+// UTF-8 prefix; invalid bytes and bytes before an end-marker ESC are emitted.
 // During a paste, use final only at EOF: a partial end marker is then text.
 // An unterminated paste has no synthetic End event; reset the parser at EOF.
 input_parse :: proc(parser: ^Input_Parser, data: []byte, final := false) -> (Input_Event, int) {
@@ -203,6 +205,19 @@ input_paste :: proc(parser: ^Input_Parser, data: []byte, final: bool) -> (Input_
 				return nil, 0
 			}
 			return Paste_Event{kind = .Chunk, text = data[:i]}, i
+		}
+	}
+	if !final {
+		start := len(data)-1
+		for start > 0 && data[start] & 0xc0 == 0x80 && len(data)-start < 4 {
+			start -= 1
+		}
+		_, consumed := input_key(data[start:], false)
+		if consumed == 0 {
+			if start == 0 {
+				return nil, 0
+			}
+			return Paste_Event{kind = .Chunk, text = data[:start]}, start
 		}
 	}
 	return Paste_Event{kind = .Chunk, text = data}, len(data)
