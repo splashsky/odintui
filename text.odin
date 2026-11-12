@@ -23,24 +23,24 @@ Text_Options :: struct {
 }
 
 @(private)
-text_Cursor :: struct {
+Text_Cursor :: struct {
 	span, offset: int,
 }
 
 @(private)
-text_Iterator :: struct {
-	cursor: text_Cursor,
+Text_Iterator :: struct {
+	cursor: Text_Cursor,
 	done:   bool,
 }
 
 @(private)
-text_Line :: struct {
-	start:  text_Cursor,
+Text_Line :: struct {
+	start:  Text_Cursor,
 	length: int,
 }
 
 @(private)
-text_next_rune :: proc(spans: []Span, cursor: ^text_Cursor) -> (rune, Style, bool) {
+text_next_rune :: proc(spans: []Span, cursor: ^Text_Cursor) -> (rune, Style, bool) {
 	for cursor.span < len(spans) {
 		span := spans[cursor.span]
 		if cursor.offset < len(span.text) {
@@ -56,7 +56,7 @@ text_next_rune :: proc(spans: []Span, cursor: ^text_Cursor) -> (rune, Style, boo
 
 // text_break consumes a hard newline, including CRLF across span boundaries.
 @(private)
-text_break :: proc(spans: []Span, cursor: ^text_Cursor, glyph: rune) -> bool {
+text_break :: proc(spans: []Span, cursor: ^Text_Cursor, glyph: rune) -> bool {
 	if glyph == '\n' {
 		return true
 	}
@@ -72,7 +72,7 @@ text_break :: proc(spans: []Span, cursor: ^text_Cursor, glyph: rune) -> bool {
 }
 
 @(private)
-text_skip_break_spaces :: proc(spans: []Span, iter: ^text_Iterator) {
+text_skip_break_spaces :: proc(spans: []Span, iter: ^Text_Iterator) {
 	for {
 		before := iter.cursor
 		glyph, _, ok := text_next_rune(spans, &iter.cursor)
@@ -90,9 +90,9 @@ text_skip_break_spaces :: proc(spans: []Span, iter: ^text_Iterator) {
 }
 
 @(private)
-text_next_line :: proc(spans: []Span, iter: ^text_Iterator, width: int, wrap: Text_Wrap) -> text_Line {
-	line := text_Line{start = iter.cursor}
-	break_at: text_Cursor
+text_next_line :: proc(spans: []Span, iter: ^Text_Iterator, width: int, wrap: Text_Wrap) -> Text_Line {
+	line := Text_Line{start = iter.cursor}
+	break_at: Text_Cursor
 	break_length := 0
 	has_break, in_space, has_word := false, false, false
 	for {
@@ -142,7 +142,7 @@ measure_spans :: proc(spans: []Span, width: int, wrap: Text_Wrap) -> (lines, wid
 	if wrap != .None && width <= 0 {
 		return 0, 0
 	}
-	iter: text_Iterator
+	iter: Text_Iterator
 	for !iter.done {
 		line := text_next_line(spans, &iter, width, wrap)
 		if lines < max(int) {
@@ -174,7 +174,7 @@ draw_spans :: proc(
 	if bounds.width <= 0 || bounds.height <= 0 {
 		return 0
 	}
-	iter: text_Iterator
+	iter: Text_Iterator
 	lines := 0
 	clip := current_clip(grid)
 	for !iter.done && lines < bounds.height {
