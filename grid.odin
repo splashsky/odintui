@@ -117,8 +117,6 @@ Grid :: struct {
 	clips:                  [MAX_CLIP_DEPTH]Rect,
 	clip_depth:             int,
 	clip:                   Rect, // Top clip intersected with bounds; cached for set_cell.
-	links, presented_links: []u32, // Optional caller-owned per-column link IDs.
-	link_urls:               []string,
 }
 
 // grid_init creates a blank grid. The allocator must outlive the grid.
@@ -209,7 +207,6 @@ grid_resize :: proc(grid: ^Grid, width, height: int) -> Grid_Error {
 	}
 	grid.width, grid.height = width, height
 	grid.cells, grid.presented, grid.dirty = cells, presented, dirty
-	grid.links, grid.presented_links, grid.link_urls = nil, nil, nil
 	grid.dirty_start = 0
 	grid.dirty_end = len(dirty)
 	grid.presented_valid = false
@@ -308,9 +305,6 @@ set_cell :: proc(grid: ^Grid, x, y: int, cell: Cell) -> bool {
 		grid_clear_pair(grid, x+1, y)
 		grid_put_raw(grid, x, y, cell)
 		grid_put_raw(grid, x+1, y, continuation)
-		if len(grid.links) > 0 && grid.links[index+1] != grid.links[index] {
-			grid.links[index+1] = grid.links[index]
-		}
 		// Even when the continuation is unchanged, it must join the diff run.
 		grid_mark_dirty(grid, y, x, x+2)
 	} else {
@@ -398,22 +392,22 @@ fill :: proc(grid: ^Grid, x, y, width, height: int, cell: Cell) {
 	if rect_is_empty(area) {
 		return
 	}
-	width := rune_width(cell.glyph)
-	if width == 0 || cell.glyph == CONTINUATION { return }
+	glyph_width := rune_width(cell.glyph)
+	if glyph_width == 0 || cell.glyph == CONTINUATION { return }
 	for row_y in area.y..<area.y+area.height {
 		column := area.x
 		// A wide fill is tiled relative to the original rectangle.
-		if width == 2 && (i128(column)-i128(x)) % 2 != 0 {
+		if glyph_width == 2 && (i128(column)-i128(x)) % 2 != 0 {
 			grid_put_single(grid, column, row_y, {' ', cell.style})
 			column += 1
 		}
 		for column < area.x+area.width {
-			if width == 2 && column+1 >= area.x+area.width {
+			if glyph_width == 2 && column+1 >= area.x+area.width {
 				grid_put_single(grid, column, row_y, {' ', cell.style})
 			} else {
 				set_cell(grid, column, row_y, cell)
 			}
-			column += width
+			column += glyph_width
 		}
 	}
 }

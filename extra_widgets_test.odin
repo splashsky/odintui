@@ -128,8 +128,8 @@ extra_widgets_no_allocation :: proc(t: ^testing.T) {
 	hints := []Key_Hint{{key = "?", label = "help", always_keep = true}}
 	defs := []Definition{{"a", "wide 界 text"}}
 	context.allocator = allocator
-	_ = grid_enable_links(&grid, current[:], presented[:], urls)
-	_ = grid_link_rect(&grid, {0, 0, 2, 1}, 1)
+	links, _ := link_grid_init(&grid, current[:], presented[:], urls)
+	_ = link_grid_set(&links, {0, 0, 2, 1}, 1)
 	_ = draw_modal(&grid, grid_bounds(&grid), {width = 8, height = 4})
 	draw_spinner(&grid, {0, 0, 2, 1}, 100)
 	_ = draw_key_hints(&grid, {0, 5, 20, 1}, hints)
@@ -139,9 +139,43 @@ extra_widgets_no_allocation :: proc(t: ^testing.T) {
 	_ = draw_big_text(&grid, {0, 0, 10, 2}, "AB\nCD")
 	_ = draw_definition_list(&grid, grid_bounds(&grid), defs)
 	writer: ansi_Test_Writer
-	ansi := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}, synchronized_output = true}
-	ansi_bind_links(&ansi, &grid)
-	testing.expect(t, render(&grid, ansi_backend(&ansi)))
+	ansi := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	ext := Ansi_Extended_Backend{ansi = &ansi, links = &links, synchronized_output = true}
+	testing.expect(t, render_linked(&grid, ansi_extended_backend(&ext), &links))
 	testing.expect(t, ansi_set_title(&ansi, "title") && ansi_set_clipboard(&ansi, []byte{1, 2, 3}))
 	testing.expect(t, failing.remaining == 0)
+}
+
+@(test)
+extra_widgets_no_allocation_attempts :: proc(t: ^testing.T) {
+	grid, err := grid_init(20, 6)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	current, presented: [120]u32
+	urls := []string{"https://example.test"}
+	links, _ := link_grid_init(&grid, current[:], presented[:], urls)
+	storage: [2]Toast
+	stack := toast_init(storage[:])
+	hints := []Key_Hint{{key = "?", label = "help", always_keep = true}}
+	defs := []Definition{{"a", "wide 界 text"}}
+	writer: ansi_Test_Writer
+	ansi := Ansi_Backend{writer = {ansi_test_writer_proc, &writer}}
+	ext := Ansi_Extended_Backend{ansi = &ansi, links = &links, synchronized_output = true}
+	attempts := 0
+	allocator := runtime.Allocator{procedure = layout_test_allocator_proc, data = &attempts}
+	previous, temp := context.allocator, context.temp_allocator
+	context.allocator, context.temp_allocator = allocator, allocator
+	_ = link_grid_set(&links, {0, 0, 2, 1}, 1)
+	_ = draw_modal(&grid, grid_bounds(&grid), {width = 8, height = 4})
+	draw_spinner(&grid, {0, 0, 2, 1}, 100)
+	_ = draw_key_hints(&grid, {0, 5, 20, 1}, hints)
+	_ = toast_push(&stack, {text = "message", expires_at_ms = 100})
+	_ = draw_toasts(&grid, grid_bounds(&grid), &stack, 1)
+	_ = draw_badge(&grid, {0, 0, 10, 1}, "ok")
+	_ = draw_big_text(&grid, {0, 0, 10, 2}, "AB\nCD")
+	_ = draw_definition_list(&grid, grid_bounds(&grid), defs)
+	ok := render_linked(&grid, ansi_extended_backend(&ext), &links)
+	ok = ansi_set_title(&ansi, "title") && ansi_set_clipboard(&ansi, []byte{1, 2, 3}) && ok
+	context.allocator, context.temp_allocator = previous, temp
+	testing.expect(t, ok && attempts == 0)
 }

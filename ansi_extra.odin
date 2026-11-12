@@ -32,7 +32,7 @@ Ansi_Cursor_Shape :: enum {
 
 // ansi_set_cursor_shape writes DECSCUSR immediately, between frames.
 ansi_set_cursor_shape :: proc(state: ^Ansi_Backend, shape: Ansi_Cursor_Shape) -> bool {
-	if state == nil || state.frame_started || int(shape) < 0 || int(shape) > 6 { return false }
+	if state == nil || int(shape) < 0 || int(shape) > 6 { return false }
 	ansi_prepare(state)
 	if !ansi_reserve(state, 32) { return false }
 	ansi_append(state, "\x1b[")
@@ -44,7 +44,7 @@ ansi_set_cursor_shape :: proc(state: ^Ansi_Backend, shape: Ansi_Cursor_Shape) ->
 // ansi_set_title writes OSC 2 immediately, stripping C0, DEL, C1 and invalid
 // UTF-8. The caller owns text; no copy is retained.
 ansi_set_title :: proc(state: ^Ansi_Backend, title: string) -> bool {
-	if state == nil || state.frame_started { return false }
+	if state == nil { return false }
 	ansi_prepare(state)
 	if !ansi_reserve(state, 16) { return false }
 	ansi_append(state, "\x1b]2;")
@@ -61,7 +61,7 @@ ANSI_CLIPBOARD_MAX :: 100 * 1024
 // without writing anything. This only requests a write: terminal policy may
 // disable clipboard access. Call between frames.
 ansi_set_clipboard :: proc(state: ^Ansi_Backend, data: []byte) -> bool {
-	if state == nil || state.frame_started || len(data) > ANSI_CLIPBOARD_MAX { return false }
+	if state == nil || len(data) > ANSI_CLIPBOARD_MAX { return false }
 	ansi_prepare(state)
 	if !ansi_reserve(state, 16) { return false }
 	ansi_append(state, "\x1b]52;c;")

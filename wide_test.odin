@@ -84,3 +84,68 @@ wide_test_ansi_diffs_and_cursor :: proc(t: ^testing.T) {
 	testing.expect(t, render(&grid, backend))
 	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0m z\x1b[0m")
 }
+
+@(test)
+wide_test_field_cursor_and_mask :: proc(t: ^testing.T) {
+	grid, err := grid_init(6, 2)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	buffer: [32]byte
+	field := text_field_init(buffer[:], "A界B")
+	text_field_home(&field)
+	text_field_right(&field)
+	x, _, visible := draw_text_field(&grid, {0, 0, 5, 1}, &field, {focused = true})
+	testing.expect(t, visible && x == 1)
+	box_test_cell(t, &grid, 1, 0, {'界', {attributes = {.Reverse}}})
+	box_test_cell(t, &grid, 2, 0, {CONTINUATION, {attributes = {.Reverse}}})
+	text_field_end(&field)
+	x, _, visible = draw_text_field(&grid, {0, 1, 3, 1}, &field, {focused = true, mask = '界'})
+	testing.expect(t, visible && x == 2 && field.scroll == 2)
+	box_test_cell(t, &grid, 0, 1, {'界', {}})
+	box_test_cell(t, &grid, 1, 1, {CONTINUATION, {}})
+	box_test_cell(t, &grid, 2, 1, {' ', {attributes = {.Reverse}}})
+}
+
+@(test)
+wide_test_random_grid_invariants :: proc(t: ^testing.T) {
+	grid, err := grid_init(8, 3)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	seed: u32 = 0x13459
+	glyphs := [5]rune{'A', '界', '🙂', ' ', '◐'}
+	for iteration in 0..<1200 {
+		seed = seed*1664525 + 1013904223
+		x := int(seed % 10)-1
+		y := int((seed >> 8) % 3)
+		glyph := glyphs[int((seed >> 16) % u32(len(glyphs)))]
+		_ = push_clip(&grid, {int((seed >> 5) % 5), 0, int((seed >> 12) % 5), 3})
+		if iteration % 3 == 0 {
+			fill(&grid, x, y, int((seed >> 20) % 5)+1, 1, {glyph, {}})
+		} else {
+			set_cell(&grid, x, y, {glyph, {}})
+		}
+		pop_clip(&grid)
+		if iteration % 100 == 0 {
+			_ = grid_resize(&grid, 7, 3)
+			_ = grid_resize(&grid, 8, 3)
+		}
+		for row in 0..<grid.height {
+			for column in 0..<grid.width {
+				cell, _ := get_cell(&grid, column, row)
+				if cell.glyph == CONTINUATION {
+					testing.expect(t, column > 0)
+					if column > 0 {
+						lead, _ := get_cell(&grid, column-1, row)
+						testing.expect(t, rune_width(lead.glyph) == 2 && lead.style == cell.style)
+					}
+				} else if rune_width(cell.glyph) == 2 {
+					testing.expect(t, column+1 < grid.width)
+					if column+1 < grid.width {
+						tail, _ := get_cell(&grid, column+1, row)
+						testing.expect(t, tail.glyph == CONTINUATION && tail.style == cell.style)
+					}
+				}
+			}
+		}
+	}
+}

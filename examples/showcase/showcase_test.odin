@@ -319,3 +319,30 @@ test_frames_do_not_allocate_and_diff_unchanged :: proc(t: ^testing.T) {
 	testing.expect(t, first_ok && second_ok && third_ok && data_ok && data_same_ok && table_ok)
 	testing.expect(t, same_runs && data_same_runs && mock.flushes == 4)
 }
+
+@(test)
+test_showcase_modal_toast_and_links :: proc(t: ^testing.T) {
+	grid, err := tui.grid_init(80, 20)
+	testing.expect(t, err == .None)
+	defer tui.grid_destroy(&grid)
+	current, presented: [1600]u32
+	urls := []string{"https://example.test"}
+	links, valid := tui.link_grid_init(&grid, current[:], presented[:], urls)
+	testing.expect(t, valid)
+	app: App
+	app_init(&app)
+	app.links = &links
+	app_draw(&grid, &app)
+	testing.expect(t, current[79] == 1 && current[75] == 0)
+	app_event(&app, tui.Key_Event{key = .F4})
+	testing.expect(t, app.toasts.count == 1)
+	app_draw(&grid, &app)
+	app_event(&app, tui.Key_Event{key = .F3})
+	app_draw(&grid, &app)
+	testing.expect(t, app.modal_open && current[79] == 0)
+	app_event(&app, tui.Key_Event{key = .Escape})
+	testing.expect(t, !app.modal_open)
+	app.now_ms = 3000
+	app_draw(&grid, &app)
+	testing.expect(t, app.toasts.count == 0 && current[79] == 1)
+}
