@@ -120,6 +120,9 @@ scroll_test_slider :: proc(t: ^testing.T) {
 	scroll_test_cell(t, &grid, 4, 0, {'●', {}})
 	draw_slider(&grid, {0, 0, 5, 1}, .Row, -1)
 	scroll_test_cell(t, &grid, 0, 0, {'●', {}})
+	draw_slider(&grid, {0, 0, 6, 1}, .Row, 0.5)
+	scroll_test_cell(t, &grid, 2, 0, {'─', {}})
+	scroll_test_cell(t, &grid, 3, 0, {'●', {}})
 	draw_slider(&grid, {0, 0, 5, 1}, .Row, transmute(f64)(u64(0x7ff8_0000_0000_0000)))
 	scroll_test_cell(t, &grid, 0, 0, {'●', {}})
 	style := Style{bg = rgb(4, 5, 6)}
@@ -145,6 +148,65 @@ scroll_test_slider :: proc(t: ^testing.T) {
 }
 
 @(test)
+scroll_test_slider_hit_round_trip :: proc(t: ^testing.T) {
+	grid, err := grid_init(260, 260)
+	testing.expect(t, err == .None)
+	defer grid_destroy(&grid)
+	lengths := []int{1, 2, 3, 6, 49, 50, 51, 98, 99, 100, 257}
+	axes := []Layout_Axis{.Row, .Column}
+	for axis in axes {
+		for length in lengths {
+			bounds := Rect{1, 1, length, 2}
+			if axis == .Column {
+				bounds = {1, 1, 2, length}
+			}
+			for i in 0..<length {
+				x, y := bounds.x, bounds.y
+				if axis == .Column {
+					y += i
+				} else {
+					x += i
+				}
+				value, ok := slider_value_at(bounds, axis, x, y)
+				testing.expect(t, ok && value >= 0 && value <= 1)
+				if length == 1 {
+					testing.expect(t, value == 0)
+				}
+				draw_slider(&grid, bounds, axis, value)
+				scroll_test_cell(t, &grid, x, y, {'●', {}})
+			}
+		}
+	}
+	_, ok := slider_value_at({2, 3, 10, 2}, .Row, 2, 4)
+	testing.expect(t, !ok)
+	_, ok = slider_value_at({2, 3, 2, 10}, .Column, 3, 3)
+	testing.expect(t, !ok)
+	_, ok = slider_value_at({2, 3, 0, 2}, .Row, 2, 3)
+	testing.expect(t, !ok)
+	_, ok = slider_value_at({2, 3, 10, 2}, .Row, 12, 3)
+	testing.expect(t, !ok)
+	value, hit := slider_value_at({min(int), 0, max(int), 1}, .Row, -2, 0)
+	testing.expect(t, hit && value >= 0 && value <= 1)
+	value, hit = slider_value_at({max(int), 0, max(int), 1}, .Row, max(int), 0)
+	testing.expect(t, hit && value == 0)
+	when size_of(int) == 8 {
+		travel := int(1 << 53)
+		indices := []int{1, travel/2+1, travel-1, travel}
+		for i in indices {
+			bounds := Rect{-i, 0, travel+1, 1}
+			value, hit = slider_value_at(bounds, .Row, 0, 0)
+			testing.expect(t, hit)
+			draw_slider(&grid, bounds, .Row, value)
+			scroll_test_cell(t, &grid, 0, 0, {'●', {}})
+		}
+		draw_slider(
+			&grid, {-max(int)/2, 0, max(int), 1}, .Row,
+			transmute(f64)(u64(0x3fef_ffff_ffff_ffff)),
+		)
+	}
+}
+
+@(test)
 scroll_test_slider_does_not_allocate :: proc(t: ^testing.T) {
 	state := Failing_Allocator{backing = context.allocator, remaining = 3}
 	allocator := runtime.Allocator{procedure = failing_allocator_proc, data = &state}
@@ -154,7 +216,11 @@ scroll_test_slider_does_not_allocate :: proc(t: ^testing.T) {
 	context.allocator = allocator
 	draw_slider(&grid, {0, 0, 5, 1}, .Row, 0.5)
 	draw_slider(&grid, {4, 0, 1, 2}, .Column, 1)
-	scroll_test_cell(t, &grid, 2, 0, {'●', {}})
 	scroll_test_cell(t, &grid, 4, 1, {'●', {}})
+	value, hit := slider_value_at({0, 0, 5, 1}, .Row, 3, 0)
+	draw_slider(&grid, {0, 1, 5, 1}, .Row, value)
+	testing.expect(t, hit)
+	scroll_test_cell(t, &grid, 2, 0, {'●', {}})
+	scroll_test_cell(t, &grid, 3, 1, {'●', {}})
 	testing.expect(t, state.remaining == 0)
 }

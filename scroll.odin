@@ -109,7 +109,8 @@ Slider_Options :: struct {
 }
 
 // draw_slider draws on the first row or column of bounds. Values clamp to
-// [0, 1], NaN is zero, and intermediate positions round toward the start.
+// [0, 1], NaN is zero, and positions round to the nearest cell, with ties
+// toward the end. Extremely long tracks are limited by f64 precision.
 draw_slider :: proc(
 	grid: ^Grid, bounds: Rect, axis: Layout_Axis, value: f64,
 	options: Slider_Options = {},
@@ -122,7 +123,7 @@ draw_slider :: proc(
 	if value >= 1 {
 		position = length-1
 	} else if value > 0 {
-		position = widget_progress_width(length-1, value)
+		position = scroll_slider_position(length-1, value)
 	}
 	track := options.track
 	if track == 0 {
@@ -137,6 +138,52 @@ draw_slider :: proc(
 	}
 	scroll_fill(grid, bounds, axis, 0, length, {track, options.track_style})
 	scroll_fill(grid, bounds, axis, position, 1, {thumb, options.thumb_style})
+}
+
+// slider_value_at maps a cell on the first row or column of bounds to its
+// normalized value. It returns false off the track; a one-cell track maps to
+// zero. Tracks up to 2^53+1 cells round-trip through draw_slider. Longer
+// tracks may have adjacent cells that f64 cannot distinguish.
+slider_value_at :: proc(
+	bounds: Rect, axis: Layout_Axis, x, y: int,
+) -> (value: f64, ok: bool) {
+	length := scroll_length(bounds, axis)
+	if length == 0 || !rect_contains(bounds, x, y) {
+		return 0, false
+	}
+	index: int
+	if axis == .Column {
+		if x != bounds.x {
+			return 0, false
+		}
+		index = int(i128(y)-i128(bounds.y))
+	} else {
+		if y != bounds.y {
+			return 0, false
+		}
+		index = int(i128(x)-i128(bounds.x))
+	}
+	if length == 1 {
+		return 0, true
+	}
+	return f64(index)/f64(length-1), true
+}
+
+@(private)
+scroll_slider_position :: proc(travel: int, value: f64) -> int {
+	// Compute the rounded product exactly to avoid float-to-int overflow.
+	bits := transmute(u64)value
+	exponent := int((bits >> 52) & 0x7ff)
+	if exponent == 0 {
+		return 0
+	}
+	shift := 1075-exponent
+	if shift >= 128 {
+		return 0
+	}
+	significand := (bits & 0x000f_ffff_ffff_ffff) | (u64(1) << 52)
+	product := u128(travel)*u128(significand)
+	return int((product+(u128(1) << uint(shift-1))) >> uint(shift))
 }
 
 @(private)
