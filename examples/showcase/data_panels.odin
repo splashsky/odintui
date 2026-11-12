@@ -112,7 +112,7 @@ table_columns :: proc() -> [4]tui.Table_Column {
 		{"ID", tui.layout_fixed(4), .End},
 		{"Name", tui.layout_percent(46), .Start},
 		{"Kind", tui.layout_fill(), .Start},
-		{"Size", tui.layout_fixed(6), .End},
+		{"Size", tui.layout_fixed(8), .End},
 	}
 }
 
@@ -120,6 +120,7 @@ table_options :: proc() -> tui.Table_Options {
 	return {
 		borderless = true,
 		scrollbar = true,
+		padding = 1,
 		header_style = {fg = color("#61dafb"), attributes = {.Bold}},
 		border_style = {fg = color("#718096")},
 		selected_style = {bg = color("#314b65"), fg = color("#ffffff")},

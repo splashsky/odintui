@@ -147,6 +147,8 @@ test_table_row_and_scrollbar :: proc(t: ^testing.T) {
 	bounds := tui.grid_bounds(&grid)
 	draw_table_panel(&grid, bounds, &state, true)
 	body := state.body
+	last_size, _ := tui.get_cell(&grid, body.x+body.width-2, body.y)
+	testing.expect(t, last_size.glyph == 'B')
 	table_event(&state, bounds, tui.Mouse_Event{
 		x = body.x+2, y = body.y+2, button = .Left, action = .Press,
 	})
@@ -157,6 +159,35 @@ test_table_row_and_scrollbar :: proc(t: ^testing.T) {
 	testing.expect(t, state.list.offset > 0 && state.list.selected >= state.list.offset)
 	table_event(&state, bounds, tui.Key_Event{key = .End})
 	testing.expect(t, state.list.selected == len(DATA_ROWS)-1)
+}
+
+@(test)
+test_pages_focus_and_batched_events :: proc(t: ^testing.T) {
+	grid, err := tui.grid_init(100, 30)
+	testing.expect(t, err == .None)
+	defer tui.grid_destroy(&grid)
+	app: App
+	app_init(&app)
+	app_draw(&grid, &app)
+	app_event(&app, tui.Key_Event{key = .Tab})
+	testing.expect(t, app.focused == .Form)
+	app_event(&app, tui.Key_Event{key = .F2})
+	testing.expect(t, app.page == DATA_PAGE && app.focused == .Files)
+	// No redraw between the page switch and these events.
+	app_event(&app, tui.Key_Event{key = .End})
+	app_event(&app, tui.Key_Event{key = .Enter})
+	testing.expect(t, app.files.list.selected == FILE_COUNT-1)
+	testing.expect(t, strings.contains(string(app.status[:app.status_n]), "list_test.odin"))
+	table := app.bounds[int(Panel.Table)]
+	body := tui.rect_inset(tui.box_content(table), tui.Insets{top = 2})
+	app_event(&app, tui.Mouse_Event{x = body.x+1, y = body.y+2, button = .Left, action = .Press})
+	testing.expect(t, app.focused == .Table && app.table.list.selected == 2)
+	app_event(&app, tui.Key_Event{key = .Tab, modifiers = {.Shift}})
+	testing.expect(t, app.focused == .Files)
+	app_event(&app, tui.Mouse_Event{x = app.tabs.x+1, y = app.tabs.y, button = .Left, action = .Press})
+	testing.expect(t, app.page == WIDGETS_PAGE && app.focused == .Form)
+	app_event(&app, tui.Mouse_Event{x = app.tabs.x+12, y = app.tabs.y, button = .Left, action = .Press})
+	testing.expect(t, app.page == DATA_PAGE && app.focused == .Files)
 }
 
 Frame_Test_Backend :: struct {
@@ -221,7 +252,21 @@ test_frames_do_not_allocate_and_diff_unchanged :: proc(t: ^testing.T) {
 	app_event(&app, tui.Mouse_Event{x = 1, y = 2, button = .Wheel_Down, action = .Press})
 	app_draw(&grid, &app)
 	third_ok := tui.render(&grid, backend)
+	app_event(&app, tui.Key_Event{key = .F2})
+	app_event(&app, tui.Key_Event{key = .End})
+	app_event(&app, tui.Key_Event{key = .Enter})
+	app_draw(&grid, &app)
+	data_ok := tui.render(&grid, backend)
+	data_runs := mock.runs
+	app_draw(&grid, &app)
+	data_same_ok := tui.render(&grid, backend)
+	data_same_runs := mock.runs == data_runs
+	app_event(&app, tui.Key_Event{key = .Tab})
+	app_event(&app, tui.Key_Event{key = .End})
+	app_draw(&grid, &app)
+	table_ok := tui.render(&grid, backend)
 	context.allocator, context.temp_allocator = saved_allocator, saved_temp
 	testing.expect(t, attempts == 0)
-	testing.expect(t, first_ok && second_ok && third_ok && same_runs && mock.flushes == 2)
+	testing.expect(t, first_ok && second_ok && third_ok && data_ok && data_same_ok && table_ok)
+	testing.expect(t, same_runs && data_same_runs && mock.flushes == 4)
 }
