@@ -263,10 +263,10 @@ ansi_style :: proc(state: ^Ansi_Backend, style: Style) {
 	if .Strikethrough in style.attributes {
 		ansi_append(state, ";9")
 	}
-	if style.fg.is_rgb {
+	if style.fg.is_rgb || style.fg.ansi_index != 0 {
 		ansi_color(state, style.fg, true)
 	}
-	if style.bg.is_rgb {
+	if style.bg.is_rgb || style.bg.ansi_index != 0 {
 		ansi_color(state, style.bg, false)
 	}
 	ansi_append(state, "m")
@@ -275,6 +275,15 @@ ansi_style :: proc(state: ^Ansi_Backend, style: Style) {
 
 @(private)
 ansi_color :: proc(state: ^Ansi_Backend, color: Color, foreground: bool) {
+	if color.ansi_index >= 1 && color.ansi_index <= 16 {
+		index := int(color.ansi_index)-1
+		code := 30+index
+		if index >= 8 { code = 90+index-8 }
+		if !foreground { code += 10 }
+		ansi_append(state, ";")
+		ansi_number(state, u64(code))
+		return
+	}
 	if state.color_mode == .Color_16 {
 		index := ansi_color_16(color)
 		code := 30 + index

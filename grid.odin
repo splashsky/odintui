@@ -6,10 +6,23 @@ import "base:runtime"
 Color :: struct {
 	r, g, b: u8,
 	is_rgb:  bool,
+	// 0 means no ANSI color; 1..16 encode palette slots 0..15. This is
+	// independent of the backend's RGB fallback mode.
+	ansi_index: u8,
+	// Reserved for an application-owned semantic role, 0 means no role. A
+	// caller must resolve it before passing the grid to a backend.
+	role_index: u8,
 }
 
 rgb :: proc(r, g, b: u8) -> Color {
-	return {r, g, b, true}
+	return {r = r, g = g, b = b, is_rgb = true}
+}
+
+// ansi_slot addresses the terminal's own 16-color palette directly. An
+// invalid index resolves to the terminal default rather than an RGB color.
+ansi_slot :: proc(index: int) -> Color {
+	if index < 0 || index >= 16 { return {} }
+	return {ansi_index = u8(index+1)}
 }
 
 // hex parses RGB hex digits in #rgb, #rrggbb, rgb, or rrggbb form.
