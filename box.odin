@@ -152,7 +152,7 @@ box_title :: proc(
 		if glyph == '\n' || glyph == '\r' || count == span {
 			break
 		}
-		count += 1
+		count += min(rune_width(glyph), span-count)
 	}
 	if count == 0 {
 		return

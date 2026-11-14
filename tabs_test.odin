@@ -11,7 +11,7 @@ tabs_test_drawing_and_hit_testing :: proc(t: ^testing.T) {
 	labels := []string{"abcde", "界"}
 	options := Tabs_Options{tab_width = 4, separator = '|', underline = true}
 	draw_tabs(&grid, {0, 0, 9, 3}, labels, 1, options)
-	text_expect_row(t, &grid, 0, " a… | 界  ")
+	text_expect_row(t, &grid, 0, " a… | 界 ")
 	text_expect_row(t, &grid, 1, "─────━━━━")
 	text_expect_row(t, &grid, 2, "         ")
 	selected := Style{attributes = {.Reverse}}
@@ -102,7 +102,7 @@ tabs_test_clipping_and_no_allocations :: proc(t: ^testing.T) {
 	testing.expect(t, result.changed && selected == 0 && ok && index == 1)
 	testing.expect(t, allocator_state.remaining == 0)
 	box_test_cell(t, &grid, 0, 0, BLANK_CELL)
-	box_test_cell(t, &grid, 1, 0, {'界', {}})
+	box_test_cell(t, &grid, 1, 0, {'…', {}})
 	box_test_cell(t, &grid, 4, 0, {'a', {attributes = {.Reverse}}})
 	box_test_cell(t, &grid, 5, 0, BLANK_CELL)
 	pop_clip(&grid)
@@ -115,7 +115,7 @@ tabs_test_defaults_and_line_breaks :: proc(t: ^testing.T) {
 	defer grid_destroy(&grid)
 	labels := []string{"é\nignored", "界"}
 	draw_tabs(&grid, {0, 0, 6, 2}, labels, 0)
-	text_expect_row(t, &grid, 0, " é  界 ")
+	text_expect_row(t, &grid, 0, " é  界")
 	index, ok := tabs_index_at({0, 0, 6, 2}, labels, 0, 3, 0)
 	testing.expect(t, ok && index == 1)
 	_, ok = tabs_index_at({0, 0, 6, 2}, labels, 0, 3, 1)
@@ -125,7 +125,7 @@ tabs_test_defaults_and_line_breaks :: proc(t: ^testing.T) {
 	draw_tabs(&grid, {0, 0, 6, 2}, labels, 1, {
 		padding = -1, selected_style = highlight, separator = '|',
 	})
-	text_expect_row(t, &grid, 0, "é|界   ")
+	text_expect_row(t, &grid, 0, "é|界  ")
 	box_test_cell(t, &grid, 2, 0, {'界', highlight})
 	_, ok = tabs_index_at({0, 0, -1, 2}, labels, 0, 0, 0)
 	testing.expect(t, !ok)

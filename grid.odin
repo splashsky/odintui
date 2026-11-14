@@ -6,10 +6,23 @@ import "base:runtime"
 Color :: struct {
 	r, g, b: u8,
 	is_rgb:  bool,
+	// 0 means no ANSI color; 1..16 encode palette slots 0..15. This is
+	// independent of the backend's RGB fallback mode.
+	ansi_index: u8,
+	// Reserved for an application-owned semantic role, 0 means no role. A
+	// caller must resolve it before passing the grid to a backend.
+	role_index: u8,
 }
 
 rgb :: proc(r, g, b: u8) -> Color {
-	return {r, g, b, true}
+	return {r = r, g = g, b = b, is_rgb = true}
+}
+
+// ansi_slot addresses the terminal's own 16-color palette directly. An
+// invalid index resolves to the terminal default rather than an RGB color.
+ansi_slot :: proc(index: int) -> Color {
+	if index < 0 || index >= 16 { return {} }
+	return {ansi_index = u8(index+1)}
 }
 
 // hex parses RGB hex digits in #rgb, #rrggbb, rgb, or rrggbb form.
@@ -76,8 +89,8 @@ Style :: struct {
 	attributes: bit_set[Attribute; u8],
 }
 
-// A glyph occupies one logical cell, not necessarily one terminal column.
-// Backends must sanitize controls and invalid runes and handle glyph widths.
+// A cell is one terminal column; CONTINUATION represents a wide glyph's second
+// column. Backends must sanitize controls and invalid runes.
 Cell :: struct {
 	glyph: rune,
 	style: Style,
@@ -188,6 +201,11 @@ grid_resize :: proc(grid: ^Grid, width, height: int) -> Grid_Error {
 			for y in 0..<min(height, grid.height) {
 				copy(cells[y*width:][:min(width, grid.width)],
 				     grid.cells[y*grid.width:][:min(width, grid.width)])
+				// Shrinking may sever a wide glyph at the right edge.
+				if width < grid.width && width > 0 &&
+				   grid.cells[y*grid.width+width].glyph == CONTINUATION {
+					cells[y*width+width-1].glyph = ' '
+				}
 			}
 		}
 		for &row in dirty {
@@ -268,19 +286,76 @@ clip_scope_end :: proc(grid: ^Grid, rect: Rect, pushed: bool) {
 	}
 }
 
-// set_cell returns false for coordinates outside the grid or current clip.
+// set_cell draws a glyph and returns whether its first column is in the clip.
+// A clipped half of a wide glyph becomes a styled space. Replacing either
+// column of an existing wide glyph also clears its other column, even outside
+// the clip, to avoid leaving an invalid half-glyph.
 set_cell :: proc(grid: ^Grid, x, y: int, cell: Cell) -> bool {
-	// The cached clip lies within the grid, so its far edges cannot overflow.
 	clip := grid.clip
-	if x < clip.x || y < clip.y || x >= clip.x+clip.width || y >= clip.y+clip.height {
+	inside := rect_contains(clip, x, y)
+	width := rune_width(cell.glyph)
+	if cell.glyph == CONTINUATION || width == 0 {
+		return inside
+	}
+	if width == 2 && !inside && x < max(int) && rect_contains(clip, x+1, y) {
+		grid_put_single(grid, x+1, y, {' ', cell.style})
 		return false
 	}
-	index := y*grid.width + x
+	if !inside {
+		return false
+	}
+	if width == 2 {
+		if x+1 >= clip.x+clip.width {
+			grid_put_single(grid, x, y, {' ', cell.style})
+			return true
+		}
+		index := y*grid.width+x
+		continuation := Cell{CONTINUATION, cell.style}
+		if grid.cells[index] == cell && grid.cells[index+1] == continuation {
+			return true
+		}
+		grid_clear_pair(grid, x, y)
+		grid_clear_pair(grid, x+1, y)
+		grid_put_raw(grid, x, y, cell)
+		grid_put_raw(grid, x+1, y, continuation)
+		// Even when the continuation is unchanged, it must join the diff run.
+		grid_mark_dirty(grid, y, x, x+2)
+	} else {
+		grid_put_single(grid, x, y, cell)
+	}
+	return true
+}
+
+@(private)
+grid_put_raw :: proc(grid: ^Grid, x, y: int, cell: Cell) {
+	index := y*grid.width+x
 	if grid.cells[index] != cell {
 		grid.cells[index] = cell
 		grid_mark_dirty(grid, y, x, x+1)
 	}
-	return true
+}
+
+@(private)
+grid_clear_pair :: proc(grid: ^Grid, x, y: int) {
+	index := y*grid.width+x
+	cell := grid.cells[index]
+	if cell.glyph == CONTINUATION && x > 0 {
+		other := grid.cells[index-1]
+		other.glyph = ' '
+		grid_put_raw(grid, x-1, y, other)
+	} else if x+1 < grid.width && grid.cells[index+1].glyph == CONTINUATION {
+		other := grid.cells[index+1]
+		other.glyph = ' '
+		grid_put_raw(grid, x+1, y, other)
+	}
+}
+
+@(private)
+grid_put_single :: proc(grid: ^Grid, x, y: int, cell: Cell) {
+	index := y*grid.width+x
+	if grid.cells[index] == cell { return }
+	grid_clear_pair(grid, x, y)
+	grid_put_raw(grid, x, y, cell)
 }
 
 @(private)
@@ -300,33 +375,24 @@ grid_mark_dirty :: proc(grid: ^Grid, y, start, end: int) {
 	}
 }
 
-// draw_text draws one decoded rune per cell on one row, including controls.
-// It clips to the current clip and grid; backends handle sanitization and widths.
+// draw_text draws one row in display columns, including controls. Zero-width
+// runes are dropped; backends sanitize controls and invalid runes.
 draw_text :: proc(grid: ^Grid, x, y: int, text: string, style: Style = {}) {
 	clip := current_clip(grid)
 	if rect_is_empty(clip) || y < clip.y || y >= clip.y+clip.height ||
 	   x >= clip.x+clip.width {
 		return
 	}
-	column := x
-	start, end := clip.x+clip.width, clip.x
-	offset := y * grid.width
+	column := i128(x)
 	for glyph in text {
-		if column >= clip.x+clip.width {
+		if column >= i128(clip.x+clip.width) {
 			break
 		}
-		if column >= clip.x {
-			cell := Cell{glyph, style}
-			if grid.cells[offset+column] != cell {
-				grid.cells[offset+column] = cell
-				start = min(start, column)
-				end = column+1
-			}
+		width := rune_width(glyph)
+		if width > 0 && column >= i128(min(int)) && column <= i128(max(int)) {
+			set_cell(grid, int(column), y, {glyph, style})
 		}
-		column += 1
-	}
-	if start < end {
-		grid_mark_dirty(grid, y, start, end)
+		column += i128(width)
 	}
 }
 
@@ -339,18 +405,22 @@ fill :: proc(grid: ^Grid, x, y, width, height: int, cell: Cell) {
 	if rect_is_empty(area) {
 		return
 	}
+	glyph_width := rune_width(cell.glyph)
+	if glyph_width == 0 || cell.glyph == CONTINUATION { return }
 	for row_y in area.y..<area.y+area.height {
-		start, end := area.x+area.width, area.x
-		offset := row_y * grid.width
-		for column_x in area.x..<area.x+area.width {
-			if grid.cells[offset+column_x] != cell {
-				grid.cells[offset+column_x] = cell
-				start = min(start, column_x)
-				end = column_x+1
-			}
+		column := area.x
+		// A wide fill is tiled relative to the original rectangle.
+		if glyph_width == 2 && (i128(column)-i128(x)) % 2 != 0 {
+			grid_put_single(grid, column, row_y, {' ', cell.style})
+			column += 1
 		}
-		if start < end {
-			grid_mark_dirty(grid, row_y, start, end)
+		for column < area.x+area.width {
+			if glyph_width == 2 && column+1 >= area.x+area.width {
+				grid_put_single(grid, column, row_y, {' ', cell.style})
+			} else {
+				set_cell(grid, column, row_y, cell)
+			}
+			column += glyph_width
 		}
 	}
 }

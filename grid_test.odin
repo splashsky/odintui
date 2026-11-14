@@ -24,9 +24,9 @@ test_grid_drawing_and_clipping :: proc(t: ^testing.T) {
 	cell, _ = get_cell(&grid, 1, 0)
 	testing.expect(t, cell == Cell{'界', style})
 	cell, _ = get_cell(&grid, 2, 0)
-	testing.expect(t, cell == Cell{'🙂', style})
+	testing.expect(t, cell == Cell{CONTINUATION, style})
 	cell, _ = get_cell(&grid, 3, 0)
-	testing.expect(t, cell == Cell{'z', style})
+	testing.expect(t, cell == Cell{' ', style})
 	draw_text(&grid, min(int), 0, "hello", style)
 	draw_text(&grid, 0, -1, "hello", style)
 

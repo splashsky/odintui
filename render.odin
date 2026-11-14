@@ -3,7 +3,7 @@ package odintui
 // draw_run writes a contiguous horizontal run; cells are borrowed for the call.
 // flush commits the writes. Both callbacks return false on failure and must
 // tolerate retries. They must not mutate the grid or retain the cells slice.
-// A backend must sanitize control/invalid runes and map glyphs to single cells.
+// A backend must sanitize controls/invalid runes and emit wide pairs once.
 Backend :: struct {
 	user_data: rawptr,
 	draw_run:  proc(user_data: rawptr, x, y: int, cells: []Cell) -> bool,
@@ -26,6 +26,23 @@ invalidate :: proc(grid: ^Grid) {
 // switching backends or when the backend's contents have been lost.
 // The grid and backend require exclusive access during render and callbacks.
 render :: proc(grid: ^Grid, backend: Backend) -> bool {
+	return render_internal(grid, backend, nil)
+}
+
+// render_linked diffs both cells and the optional caller-owned link sidecar.
+// Use ansi_extended_backend bound to the same sidecar for OSC 8 output. Do
+// not alternate with render without first invalidating the grid.
+render_linked :: proc(grid: ^Grid, backend: Backend, links: ^Link_Grid) -> bool {
+	if !link_grid_valid(links, grid) {
+		if grid != nil { invalidate(grid) }
+		return false
+	}
+	link_grid_normalize(links)
+	return render_internal(grid, backend, links)
+}
+
+@(private)
+render_internal :: proc(grid: ^Grid, backend: Backend, links: ^Link_Grid) -> bool {
 	if grid.dirty_start == grid.dirty_end {
 		return true
 	}
@@ -36,14 +53,22 @@ render :: proc(grid: ^Grid, backend: Backend) -> bool {
 		x := row.start
 		for x < row.end {
 			index := y*grid.width + x
-			if grid.presented_valid && grid.cells[index] == grid.presented[index] {
+			if grid.presented_valid && grid.cells[index] == grid.presented[index] &&
+			   (links == nil || links.current[index] == links.presented[index]) {
 				x += 1
 				continue
 			}
 			start := x
+			// Runs must never start on a continuation, even when only its
+			// sidecar metadata changed. Include the already-presented lead.
+			if grid.cells[index].glyph == CONTINUATION && start > 0 {
+				start -= 1
+			}
 			for x < row.end {
 				index = y*grid.width + x
-				if grid.presented_valid && grid.cells[index] == grid.presented[index] {
+				if grid.presented_valid && grid.cells[index] == grid.presented[index] &&
+				   (links == nil || links.current[index] == links.presented[index]) &&
+				   grid.cells[index].glyph != CONTINUATION {
 					break
 				}
 				x += 1
@@ -70,6 +95,10 @@ render :: proc(grid: ^Grid, backend: Backend) -> bool {
 			offset := y * grid.width
 			copy(grid.presented[offset+row.start:offset+row.end],
 			     grid.cells[offset+row.start:offset+row.end])
+			if links != nil {
+				copy(links.presented[offset+row.start:offset+row.end],
+				     links.current[offset+row.start:offset+row.end])
+			}
 			row = {}
 		}
 	}

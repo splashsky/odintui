@@ -1,6 +1,6 @@
 package odintui
 
-// draw_label draws one rune per cell, clipped to bounds and the grid. A
+// draw_label draws display columns, clipped to bounds and the grid. A
 // carriage return or newline ends the label; other runes are passed through.
 draw_label :: proc(grid: ^Grid, bounds: Rect, text: string, style: Style = {}) {
 	grid_rect := grid_bounds(grid)
@@ -8,19 +8,25 @@ draw_label :: proc(grid: ^Grid, bounds: Rect, text: string, style: Style = {}) {
 	   bounds.y < 0 || bounds.y >= grid_rect.height || bounds.x >= grid_rect.width {
 		return
 	}
-	x, remaining := bounds.x, bounds.width
+	x, remaining := i128(bounds.x), bounds.width
 	for glyph in text {
-		if glyph == '\n' || glyph == '\r' || x >= grid_rect.width {
+		glyph := glyph
+		if glyph == '\n' || glyph == '\r' || x >= i128(grid_rect.width) {
 			break
 		}
-		if x >= 0 {
-			set_cell(grid, x, bounds.y, {glyph, style})
+		width := rune_width(glyph)
+		if width == 0 { continue }
+		if width > remaining {
+			glyph = ' '
 		}
-		remaining -= 1
-		if remaining == 0 {
+		if x >= i128(min(int)) && x <= i128(max(int)) {
+			set_cell(grid, int(x), bounds.y, {glyph, style})
+		}
+		remaining -= min(remaining, width)
+		if remaining <= 0 {
 			break
 		}
-		x += 1
+		x += i128(width)
 	}
 }
 

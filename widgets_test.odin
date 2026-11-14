@@ -17,7 +17,7 @@ test_widget_label_clipping :: proc(t: ^testing.T) {
 
 	draw_label(&grid, Rect{-1, 1, 3, 2}, "aé界z", style)
 	widget_test_cell(t, &grid, 0, 1, {'é', style})
-	widget_test_cell(t, &grid, 1, 1, {'界', style})
+	widget_test_cell(t, &grid, 1, 1, {' ', style})
 	widget_test_cell(t, &grid, 2, 1, BLANK_CELL)
 	widget_test_cell(t, &grid, 0, 2, BLANK_CELL)
 	draw_label(&grid, Rect{2, 0, 3, 1}, "A\nBC", style)

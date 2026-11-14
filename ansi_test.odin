@@ -1,6 +1,7 @@
 package odintui
 
 import "base:runtime"
+import "core:fmt"
 import "core:io"
 import "core:testing"
 
@@ -61,6 +62,26 @@ ansi_test_frame_and_buffering :: proc(t: ^testing.T) {
 	testing.expect(t, backend.flush(backend.user_data))
 	testing.expect(t, writer.writes == 1)
 	testing.expect_value(t, ansi_test_text(&writer), "\x1b[1;1H\x1b[0;1mabc\x1b[0md\x1b[0m")
+}
+
+@(test)
+ansi_explicit_palette_slots_are_not_rgb_fallbacks :: proc(t: ^testing.T) {
+	modes := [3]Ansi_Color_Mode{.Color_16,.Color_256,.Truecolor}
+	for mode in modes {
+		for i in 0..<16 {
+			writer: ansi_Test_Writer
+			state := Ansi_Backend{writer={ansi_test_writer_proc,&writer},color_mode=mode}
+			backend := ansi_backend(&state)
+			cells := [1]Cell{{'x',{fg=ansi_slot(i),bg=ansi_slot(15-i)}}}
+			testing.expect(t,backend.draw_run(backend.user_data,0,0,cells[:]))
+			testing.expect(t,backend.flush(backend.user_data))
+			fg := 30+i; if i >= 8 { fg = 90+i-8 }
+			j := 15-i; bg := 40+j; if j >= 8 { bg = 100+j-8 }
+			expected := fmt.tprintf("\x1b[1;1H\x1b[0;%d;%dmx\x1b[0m",fg,bg)
+			testing.expect_value(t,ansi_test_text(&writer),expected)
+		}
+	}
+	testing.expect(t,ansi_slot(-1) == Color{} && ansi_slot(16) == Color{})
 }
 
 @(test)

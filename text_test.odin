@@ -9,7 +9,11 @@ text_expect_row :: proc(t: ^testing.T, grid: ^Grid, y: int, expected: string) {
 	for glyph in expected {
 		cell, ok := get_cell(grid, x, y)
 		testing.expect(t, ok && cell.glyph == glyph)
-		x += 1
+		if rune_width(glyph) == 2 {
+			cell, ok = get_cell(grid, x+1, y)
+			testing.expect(t, ok && cell.glyph == CONTINUATION)
+		}
+		x += rune_width(glyph)
 	}
 }
 
@@ -30,7 +34,7 @@ text_test_spans_alignment_and_clipping :: proc(t: ^testing.T) {
 	lines := draw_spans(&grid, Rect{0, 0, 7, 4}, spans, {align = .Center})
 	pop_clip(&grid)
 	testing.expect(t, lines == 2)
-	text_expect_row(t, &grid, 0, "..A界....")
+	text_expect_row(t, &grid, 0, "..A界...")
 	text_expect_row(t, &grid, 1, "...B....")
 	cell, _ := get_cell(&grid, 2, 0)
 	testing.expect(t, cell.style == red)
@@ -47,12 +51,13 @@ text_test_character_wrap_and_hard_breaks :: proc(t: ^testing.T) {
 	defer grid_destroy(&grid)
 	spans := []Span{{"ab", {}}, {"界d\r", {}}, {"\ne\n", {}}}
 	lines, widest := measure_spans(spans, 2, .Char)
-	testing.expect(t, lines == 4 && widest == 2)
+	testing.expect(t, lines == 5 && widest == 2)
 	testing.expect(t, draw_spans(&grid, Rect{0, 0, 2, 6}, spans, {wrap = .Char}) == lines)
 	text_expect_row(t, &grid, 0, "ab  ")
-	text_expect_row(t, &grid, 1, "界d  ")
-	text_expect_row(t, &grid, 2, "e   ")
-	text_expect_row(t, &grid, 3, "    ")
+	text_expect_row(t, &grid, 1, "界  ")
+	text_expect_row(t, &grid, 2, "d   ")
+	text_expect_row(t, &grid, 3, "e   ")
+	text_expect_row(t, &grid, 4, "    ")
 	lines, widest = measure_text("ab\rX\n", 1, .None)
 	testing.expect(t, lines == 2 && widest == 4)
 	testing.expect(t, draw_paragraph(&grid, Rect{0, 4, 4, 1}, "a\rb") == 1)
@@ -116,7 +121,7 @@ text_test_drawing_and_measurement_do_not_allocate :: proc(t: ^testing.T) {
 	) == 2)
 	testing.expect(t, draw_paragraph(&grid, grid_bounds(&grid), "abc def", {}, {wrap = .Char}) == 1)
 	lines, widest := measure_spans(spans, 8, .Word)
-	testing.expect(t, lines == 3 && widest == 5)
+	testing.expect(t, lines == 3 && widest == 6)
 	lines, widest = measure_text("abcd", 2, .Char)
 	testing.expect(t, lines == 2 && widest == 2)
 	testing.expect(t, state.remaining == 0)

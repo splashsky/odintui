@@ -263,10 +263,10 @@ ansi_style :: proc(state: ^Ansi_Backend, style: Style) {
 	if .Strikethrough in style.attributes {
 		ansi_append(state, ";9")
 	}
-	if style.fg.is_rgb {
+	if style.fg.is_rgb || style.fg.ansi_index != 0 {
 		ansi_color(state, style.fg, true)
 	}
-	if style.bg.is_rgb {
+	if style.bg.is_rgb || style.bg.ansi_index != 0 {
 		ansi_color(state, style.bg, false)
 	}
 	ansi_append(state, "m")
@@ -275,6 +275,15 @@ ansi_style :: proc(state: ^Ansi_Backend, style: Style) {
 
 @(private)
 ansi_color :: proc(state: ^Ansi_Backend, color: Color, foreground: bool) {
+	if color.ansi_index >= 1 && color.ansi_index <= 16 {
+		index := int(color.ansi_index)-1
+		code := 30+index
+		if index >= 8 { code = 90+index-8 }
+		if !foreground { code += 10 }
+		ansi_append(state, ";")
+		ansi_number(state, u64(code))
+		return
+	}
 	if state.color_mode == .Color_16 {
 		index := ansi_color_16(color)
 		code := 30 + index
@@ -367,7 +376,7 @@ ansi_single_column :: proc(glyph: rune) -> bool {
 	       !unicode.is_spacing_mark(glyph) &&
 	       !unicode.is_enclosing_mark(glyph) &&
 	       !unicode.is_gcb_extend_class(glyph) &&
-	       unicode.normalized_east_asian_width(glyph) == 1
+	       rune_width(glyph) == 1
 }
 
 @(private)
@@ -391,7 +400,9 @@ ansi_draw_run :: proc(data: rawptr, x, y: int, cells: []Cell) -> bool {
 	if !state.cursor_known || state.cursor_x != x || state.cursor_y != y {
 		ansi_move(state, x, y)
 	}
-	for cell in cells {
+	i := 0
+	for i < len(cells) {
+		cell := cells[i]
 		if !ansi_reserve(state, 128) {
 			return false
 		}
@@ -399,7 +410,13 @@ ansi_draw_run :: proc(data: rawptr, x, y: int, cells: []Cell) -> bool {
 			ansi_style(state, cell.style)
 		}
 		glyph := cell.glyph
-		if !ansi_single_column(glyph) {
+		width := 1
+		if rune_width(glyph) == 2 && unicode.is_graphic(glyph) &&
+		   i+1 < len(cells) && cells[i+1].glyph == CONTINUATION {
+			width = 2
+		} else if glyph == CONTINUATION {
+			glyph = ' '
+		} else if rune_width(glyph) != 1 || !ansi_single_column(glyph) {
 			glyph = state.replacement
 			if !ansi_single_column(glyph) {
 				glyph = '?'
@@ -407,7 +424,8 @@ ansi_draw_run :: proc(data: rawptr, x, y: int, cells: []Cell) -> bool {
 		}
 		encoded, n := utf8.encode_rune(glyph)
 		state.buffer_len += copy(state.buffer[state.buffer_len:], encoded[:n])
-		state.cursor_x += 1
+		state.cursor_x += width
+		i += width
 	}
 	return true
 }

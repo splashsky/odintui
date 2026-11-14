@@ -26,8 +26,8 @@ renders an initial frame, an update, and an unchanged frame, reporting the
 backend's draw-run, cell and flush counts. Its application-owned backend stores
 a plain-text snapshot and prints it without terminal control sequences; it
 works with redirected output. It substitutes `?` for every glyph outside
-printable ASCII and intentionally ignores styles. The `Input: ??` in its
-output demonstrates replacement of an escape character and a wide rune.
+printable ASCII and intentionally ignores styles. Its `?` characters also
+make continuation cells visible in the snapshot.
 
 The showcase is an interactive Linux/macOS terminal application built on the
 ANSI backend and input parser. It has two pages selected with a tab bar (or
@@ -35,7 +35,9 @@ F1/F2): a
 "Widgets" page with scrollable styled text, a form with text fields, a
 slider, progress bar and palette, and an event log; and a "Data" page with a
 custom-row list and a scrolling table. It reflows on resize and supports
-keyboard and mouse input. `examples/showcase/terminal.odin` is a small,
+keyboard and mouse input. F3 opens a modal, F4 adds a toast, and the header
+shows a spinner, wide glyphs and an OSC 8 documentation link. The footer uses
+the priority-based key-hint bar. `examples/showcase/terminal.odin` is a small,
 copyable POSIX host: raw mode, alternate screen, signal-safe restoration,
 `poll`-based input with an escape timeout, and terminal size queries.
 
@@ -50,9 +52,31 @@ its buffers: do not copy it or mutate its fields directly. Use `grid_bounds`,
 Resize preserves the overlap, blanks newly exposed cells and leaves the grid
 unchanged on error.
 
-Each decoded rune occupies one **logical** cell: no grapheme segmentation or
-terminal Unicode-width calculation is performed. `draw_label` and `draw_text`
-clip; `draw_spans` wraps.
+Each cell is one terminal column. Wide/Fullwidth and Emoji_Presentation runes
+use two columns; the second has `glyph == CONTINUATION`. `Cell` still has only
+`glyph` and `style`, so positional literals remain valid. `rune_width(r)` and
+`text_width(s)` expose the width policy; East Asian ambiguous characters are
+always narrow. The East Asian table comes from Odin core Unicode 15.1, and the
+additional Emoji_Presentation table is generated from Unicode 15.1 data by
+`tools/generate_emoji_width.py`.
+
+To regenerate that table from the matching Unicode data:
+
+```sh
+curl -fsSL https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-data.txt -o /tmp/emoji-data.txt
+python3 tools/generate_emoji_width.py /tmp/emoji-data.txt > emoji_width_generated.odin
+```
+
+There is **no grapheme segmentation**: combining marks, variation selectors,
+ZWJ and other zero-width runes are dropped, not composed with their preceding
+runes. Thus multi-rune emoji, flags and combining sequences are not faithfully
+rendered; terminal behavior can vary. Controls and invalid scalars retain one
+column in the grid and are sanitized by the ANSI backend. `draw_label` and
+`draw_text` clip; `draw_spans` wraps. If a wide glyph is cut at a clip or
+rectangle edge, its visible half becomes a styled space. Replacing either
+half of an existing wide glyph clears its other half, even just outside the
+clip, to keep the grid valid. A resize that cuts a glyph also replaces it with
+a styled space. Wide `fill` glyphs tile in pairs relative to the fill origin.
 
 ### Styles and clipping
 
@@ -153,6 +177,37 @@ give a sensible default look.
   `ansi_set_cursor`. Invalid UTF-8 and control characters are discarded.
 - **Labels and progress**: `draw_label`, `draw_border` and
   `draw_progress_bar`.
+- **Modal/overlay**: `draw_modal(grid, bounds, options)` dims the backdrop
+  by default (`.Clear` and `.None` are also available), draws a centered,
+  filled box and returns its content rect. Set width/height and `box` to
+  customize it. `modal_handle(event)` reports Enter/Escape; the caller owns
+  open/closed state and decides what actions do.
+- **Spinner**: `spinner_frame(elapsed_ms, options)` and `draw_spinner` use
+  an elapsed monotonic time and optional borrowed frame slice and interval.
+  Default frames are ASCII, changing every 80 ms. The host schedules redraws.
+- **Key hints**: `draw_key_hints(grid, bounds, hints, options)` displays up to
+  `MAX_KEY_HINTS` borrowed `{key, label, priority, always_keep}` items, keeping
+  higher priorities first, dropping equal priorities from the right, and
+  rendering selected items in their original order. `always_keep` wins over
+  ordinary priorities; if even the first such item cannot fit it is clipped.
+  The separator defaults to three spaces; key, label and separator have separate
+  styles. The return value is the number of items displayed.
+- **Toasts**: `toast_init(storage)` borrows a caller-owned `[]Toast`;
+  `toast_push`, `toast_expire` and `draw_toasts` use a caller-supplied
+  monotonic millisecond clock. Expiry is absolute (`0` means never); a full
+  queue drops its oldest entry. Drawing expires entries and stacks the newest
+  at bottom-right. Messages are borrowed, not copied. The host triggers redraws
+  at expiry and clears/redraws the background on the next frame.
+- **Badge**: `draw_badge(grid, bounds, text, options)` fills a one-line pill
+  and returns its actual rectangle. Padding defaults to one cell.
+- **Big text/logo**: `draw_big_text(grid, bounds, multiline_text, style,
+  options)` draws literal multi-line text; set `align` and `reveal = true`
+  with `reveal_fraction` in `[0, 1]` for a left-to-right reveal. Zero options
+  show the whole block. No fonts or rasterizer are built in.
+- **Definition list**: `draw_definition_list(grid, bounds, items, options)`
+  aligns borrowed labels with word-wrapped values. The default label style is
+  dim; widths are inferred unless `label_width` is positive. It returns the
+  number of definitions with at least a partially visible row.
 
 ### Input
 
@@ -170,12 +225,70 @@ ambiguous: after a short timeout with no further input, parse again with
 
 `Ansi_Backend` writes to any `io.Writer` through a fixed 4 KiB buffer,
 emitting cursor moves and SGR changes only when needed in truecolor,
-256-color or 16-color mode. Glyphs that are not single-column printable are
-replaced. `ansi_backend(&state)` returns the `Backend` for `render`.
+256-color or 16-color mode. It emits a wide glyph once and skips its
+continuation; unsafe or unpaired glyphs are replaced. `ansi_backend(&state)`
+returns the `Backend` for `render`.
 `ansi_enter` and `ansi_leave` switch the alternate screen, cursor visibility,
 mouse reporting, bracketed paste, focus events and kitty keyboard mode;
 `ansi_clear` and `ansi_set_cursor` act immediately. Raw mode and terminal size
 queries remain the host's job; see the showcase.
+
+To wrap each changed frame with DEC mode 2026 begin/end, create an
+`Ansi_Extended_Backend{ansi = &state, synchronized_output = true}` and pass
+`ansi_extended_backend(&extended)` to `render`. Ordinary `Ansi_Backend` and
+`ansi_backend` remain unchanged. After a short write, retrying through the
+extended backend cancels the interrupted sequence and closes any possibly
+open link and synchronized frame. Before abandoning a failed or unfinished
+frame, call `ansi_extended_recover(&extended)`; if recovery fails, the host
+must restore terminal modes itself.
+
+`ansi_set_cursor_shape(&state, .Steady_Bar)` emits DECSCUSR;
+`ansi_set_title(&state, title)` emits OSC 2; and
+`ansi_set_clipboard(&state, bytes)` requests an OSC 52 clipboard write.
+These are immediate, between-frame operations. The clipboard helper base64
+encodes arbitrary bytes, rejects payloads over `ANSI_CLIPBOARD_MAX` (100 KiB)
+without writing, and cannot guarantee terminal permission. Title and link
+strings have invalid UTF-8 and C0, DEL and C1 controls stripped; clipboard
+payloads cannot inject escapes because they are base64 encoded.
+
+#### Hyperlinks
+
+OSC 8 is opt-in. To preserve the existing public struct layouts, links live in
+a `Link_Grid` sidecar with two caller-owned per-column `u32` planes and
+borrowed URLs. Example (the planes and strings must outlive the sidecar):
+
+```odin
+current := make([]u32, width*height)
+presented := make([]u32, width*height)
+defer delete(current)
+defer delete(presented)
+urls := []string{"https://example.org"} // ID 1; ID 0 means no link
+links, ok := tui.link_grid_init(&grid, current, presented, urls)
+if !ok { /* handle error */ }
+defer tui.link_grid_destroy(&links)
+extended := tui.Ansi_Extended_Backend{ansi = &ansi, links = &links, synchronized_output = true}
+defer _ = tui.ansi_extended_recover(&extended)
+
+// Every frame, clear stale annotations, draw, and annotate the desired cells:
+_ = tui.link_grid_set(&links, tui.grid_bounds(&grid), 0)
+tui.draw_label(&grid, link_rect, "example")
+_ = tui.link_grid_set(&links, link_rect, 1)
+_ = tui.render_linked(&grid, tui.ansi_extended_backend(&extended), &links)
+```
+
+Annotations persist independently of drawing, are diffed even when glyphs do
+not change, and touching one half of a wide glyph annotates both halves.
+If a newly drawn wide glyph covers different annotations, its second column
+inherits the first column's ID when `render_linked` runs.
+`link_grid_init` clears both non-overlapping planes and invalidates the grid;
+`link_grid_destroy` detaches and invalidates. After any resize, initialize the
+sidecar again with appropriately sized planes before rendering. If URL
+contents, binding, or table change, call `invalidate` so the terminal sees
+updated links. The grid and URL table must not be changed during rendering;
+the extended backend and `render_linked` must use the same sidecar. Do not
+alternate between `render` and `render_linked` without invalidating the grid.
+After detaching links, set `extended.links = nil` or use the ordinary ANSI
+backend before rendering without the sidecar.
 
 ### Writing your own widget
 
@@ -205,8 +318,10 @@ Provide a `Backend` with `draw_run` and `flush` callbacks, as in the demo.
 `draw_run` receives a borrowed slice of adjacent cells for one row; callbacks
 must not retain or modify it, mutate the grid, or assume they will not be
 retried. Give rendering exclusive access to the grid and backend. A real
-terminal backend must sanitize control and invalid runes and map glyphs to
-single-column printable output; the grid does not do this for it.
+terminal backend must sanitize control and invalid runes, emit a wide glyph
+once, and skip its `CONTINUATION` column. A changed wide glyph and its
+continuation are delivered in the same run. The grid does not sanitize glyphs
+for a backend.
 
 `render` sends changed runs and commits the presented state only after a
 successful flush. Check its boolean result: a failed callback may already have
